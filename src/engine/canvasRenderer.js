@@ -4,7 +4,7 @@ import { FONT_FAMILY_MAP, GRID_SIZE, UI_TOKENS } from '../constants/tokens.js';
 import { getElementBounds, getResizeHandles, getRotationHandle } from './geometry.js';
 import { drawCanvasMarker } from './markers.js';
 import { getNormalizedRect, getShapePorts, isConnectableElement } from './ports.js';
-import { computeConnectorPath } from './router.js';
+import { computeConnectorJumpPointsMap, computeConnectorPath } from './router.js';
 import { applyStrokeDash, drawShapeElement, wrapTextLines } from './shapeRegistry.js';
 
 /**
@@ -236,6 +236,7 @@ export function drawChalkElementsLayer(destCtx, elements, opts) {
 
   const rc = rough.canvas(layer);
   const elementsById = new Map(elements.map((el) => [el.id, el]));
+  const jumpPointsMap = computeConnectorJumpPointsMap(elements, elementsById);
 
   const restoreInk = patchChalkInk(lctx);
   try {
@@ -253,7 +254,15 @@ export function drawChalkElementsLayer(destCtx, elements, opts) {
       if (el.type === 'connector') {
         const chalkConn =
           el.roughness > 0 ? el : { ...el, roughness: 1.15 };
-        drawConnectorElement(lctx, chalkConn, elementsById, rc, false);
+        drawConnectorElement(
+          lctx,
+          chalkConn,
+          elementsById,
+          rc,
+          false,
+          false,
+          jumpPointsMap.get(el.id),
+        );
       }
     }
   } finally {
@@ -615,13 +624,14 @@ export function drawConnectorLabel(ctx, el, elementsById, isChalkboard = false) 
 }
 
 /**
- * Render a connector (straight, orthogonal elbow, or curved) with markers and optional midpoint label.
+ * Render a connector (straight, orthogonal elbow, or curved) with markers, sharp crossing jumps, and optional label.
  * @param {CanvasRenderingContext2D} ctx
  * @param {import('../types/schema.js').BoardElement} el
  * @param {Map<string, import('../types/schema.js').BoardElement>} elementsById
  * @param {any} [rc] Optional RoughCanvas instance for Sketch mode
  * @param {boolean} [drawLabel] Pass false when labels are drawn in a dedicated top pass
  * @param {boolean} [isChalkboard]
+ * @param {Array<{ x: number, y: number }>} [overridePoints] Precomputed polyline including sharp line jumps
  */
 export function drawConnectorElement(
   ctx,
@@ -630,9 +640,12 @@ export function drawConnectorElement(
   rc,
   drawLabel = true,
   isChalkboard = false,
+  overridePoints,
 ) {
   const routed = computeConnectorPath(el, elementsById);
-  if (routed.points.length < 2) return;
+  const drawPts = overridePoints && overridePoints.length >= 2 ? overridePoints : routed.points;
+  const hasJumps = Boolean(overridePoints && overridePoints.length >= 2);
+  if (drawPts.length < 2) return;
 
   const strokeColor = isChalkboard ? toChalkInk(el.strokeColor, 'stroke') : el.strokeColor;
 
@@ -644,15 +657,15 @@ export function drawConnectorElement(
     const opts = {
       stroke: strokeColor,
       strokeWidth: el.strokeWidth,
-      roughness: el.roughness,
+      roughness: hasJumps ? Math.min(el.roughness, 0.75) : el.roughness,
       seed: el.seed,
     };
     if (el.strokeStyle === 'dashed') opts.strokeLineDash = [8, 6];
     else if (el.strokeStyle === 'dotted') opts.strokeLineDash = [2, 5];
 
     /** @type {[number, number][]} */
-    const tuples = routed.points.map((p) => [p.x, p.y]);
-    if (routed.cubic) {
+    const tuples = drawPts.map((p) => [p.x, p.y]);
+    if (routed.cubic && !hasJumps) {
       rc.curve(tuples, opts);
     } else {
       rc.linearPath(tuples, opts);
@@ -661,18 +674,19 @@ export function drawConnectorElement(
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = el.strokeWidth;
     ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    ctx.lineJoin = hasJumps ? 'miter' : 'round';
+    ctx.miterLimit = 6;
     applyStrokeDash(ctx, el.strokeStyle);
 
     ctx.beginPath();
-    if (routed.cubic) {
+    if (routed.cubic && !hasJumps) {
       const { start, cp1, cp2, end } = routed.cubic;
       ctx.moveTo(start.x, start.y);
       ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, end.x, end.y);
     } else {
-      ctx.moveTo(routed.points[0].x, routed.points[0].y);
-      for (let i = 1; i < routed.points.length; i += 1) {
-        ctx.lineTo(routed.points[i].x, routed.points[i].y);
+      ctx.moveTo(drawPts[0].x, drawPts[0].y);
+      for (let i = 1; i < drawPts.length; i += 1) {
+        ctx.lineTo(drawPts[i].x, drawPts[i].y);
       }
     }
     ctx.stroke();
@@ -753,6 +767,8 @@ export function renderCanvasScene(canvas, state) {
     });
 
   if (!renderedAsChalk) {
+    const jumpPointsMap = computeConnectorJumpPointsMap(state.elements, elementsById);
+
     // Draw non-connectors first, then connectors on top
     for (const el of state.elements) {
       if (el.type === 'connector') continue;
@@ -763,10 +779,18 @@ export function renderCanvasScene(canvas, state) {
       }
     }
 
-    // Pass 2: Connector lines & arrowheads
+    // Pass 2: Connector lines & arrowheads (with sharp line jumps at crossings)
     for (const el of state.elements) {
       if (el.type === 'connector') {
-        drawConnectorElement(ctx, el, elementsById, rc, false, isChalkboard);
+        drawConnectorElement(
+          ctx,
+          el,
+          elementsById,
+          rc,
+          false,
+          isChalkboard,
+          jumpPointsMap.get(el.id),
+        );
       }
     }
 

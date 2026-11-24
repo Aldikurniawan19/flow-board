@@ -423,3 +423,193 @@ export function computeConnectorPath(connector, elementsById) {
     cubic: null,
   };
 }
+
+/**
+ * Find strict interior intersection distance along segment A (p1->p2) when crossing segment B (q1->q2).
+ * Returns null if segments are parallel, non-intersecting, or meet only near endpoints/corners.
+ * @param {{ x: number, y: number }} p1
+ * @param {{ x: number, y: number }} p2
+ * @param {{ x: number, y: number }} q1
+ * @param {{ x: number, y: number }} q2
+ * @param {number} marginA
+ * @param {number} marginB
+ * @returns {number | null}
+ */
+function findProperSegmentCrossing(p1, p2, q1, q2, marginA, marginB) {
+  // Fast AABB reject
+  if (
+    Math.max(p1.x, p2.x) < Math.min(q1.x, q2.x) ||
+    Math.min(p1.x, p2.x) > Math.max(q1.x, q2.x) ||
+    Math.max(p1.y, p2.y) < Math.min(q1.y, q2.y) ||
+    Math.min(p1.y, p2.y) > Math.max(q1.y, q2.y)
+  ) {
+    return null;
+  }
+
+  const dx1 = p2.x - p1.x;
+  const dy1 = p2.y - p1.y;
+  const dx2 = q2.x - q1.x;
+  const dy2 = q2.y - q1.y;
+  const lenA = Math.hypot(dx1, dy1);
+  const lenB = Math.hypot(dx2, dy2);
+  if (lenA <= marginA * 2 || lenB <= marginB * 2) return null;
+
+  const denom = dx1 * dy2 - dy1 * dx2;
+  // Ignore parallel or near-parallel grazing lines (< ~10°)
+  if (Math.abs(denom) / (lenA * lenB) < 0.18) return null;
+
+  const rx = q1.x - p1.x;
+  const ry = q1.y - p1.y;
+  const t = (rx * dy2 - ry * dx2) / denom;
+  const u = (rx * dy1 - ry * dx1) / denom;
+
+  const distA = t * lenA;
+  const distB = u * lenB;
+  if (distA < marginA || distA > lenA - marginA) return null;
+  if (distB < marginB || distB > lenB - marginB) return null;
+  return distA;
+}
+
+/**
+ * Compute sharp triangular line-jump polylines (`/\\`) for all crossing connectors in a scene.
+ * For every pair of crossing connectors, ONLY the later (upper z-order) connector jumps over
+ * the earlier connector with a crisp pointed peak so crossing lines are unmistakable.
+ *
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ * @param {Map<string, import('../types/schema.js').BoardElement>} elementsById
+ * @param {{ jumpHalf?: number, jumpHeight?: number }} [options]
+ * @returns {Map<string, Array<{ x: number, y: number }>>}
+ */
+export function computeConnectorJumpPointsMap(elements, elementsById, options = {}) {
+  const jumpHalf = options.jumpHalf ?? 6;
+  const jumpHeight = options.jumpHeight ?? 7.5;
+  const marginA = jumpHalf + 3;
+  const marginB = 4;
+
+  const connectors = elements.filter((el) => el.type === 'connector');
+  /** @type {Map<string, Array<{ x: number, y: number }>>} */
+  const result = new Map();
+  if (connectors.length < 2) return result;
+
+  /** @type {Array<{ id: string, points: Array<{ x: number, y: number }>, minX: number, maxX: number, minY: number, maxY: number }>} */
+  const routedList = [];
+  for (const conn of connectors) {
+    const routed = computeConnectorPath(conn, elementsById);
+    if (routed.points.length < 2) continue;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const pt of routed.points) {
+      if (pt.x < minX) minX = pt.x;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+    routedList.push({ id: conn.id, points: routed.points, minX, maxX, minY, maxY });
+  }
+
+  for (let i = 1; i < routedList.length; i += 1) {
+    const upper = routedList[i];
+    let hasAnyJump = false;
+    /** @type {Array<{ x: number, y: number }>} */
+    const jumped = [upper.points[0]];
+
+    for (let segIdx = 0; segIdx < upper.points.length - 1; segIdx += 1) {
+      const p1 = upper.points[segIdx];
+      const p2 = upper.points[segIdx + 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const segLen = Math.hypot(dx, dy);
+
+      if (segLen <= marginA * 2) {
+        jumped.push(p2);
+        continue;
+      }
+
+      /** @type {number[]} */
+      const hits = [];
+      for (let j = 0; j < i; j += 1) {
+        const lower = routedList[j];
+        if (
+          upper.maxX < lower.minX ||
+          upper.minX > lower.maxX ||
+          upper.maxY < lower.minY ||
+          upper.minY > lower.maxY
+        ) {
+          continue;
+        }
+        for (let k = 0; k < lower.points.length - 1; k += 1) {
+          const dist = findProperSegmentCrossing(
+            p1,
+            p2,
+            lower.points[k],
+            lower.points[k + 1],
+            marginA,
+            marginB,
+          );
+          if (dist !== null) hits.push(dist);
+        }
+      }
+
+      if (hits.length === 0) {
+        jumped.push(p2);
+        continue;
+      }
+
+      hits.sort((a, b) => a - b);
+
+      // Merge crossings too close to form separate non-overlapping tents
+      /** @type {Array<{ startD: number, peakD: number, endD: number }>} */
+      const clusters = [];
+      for (const d of hits) {
+        const prev = clusters[clusters.length - 1];
+        if (prev && d - prev.endD < jumpHalf + 1) {
+          prev.endD = Math.min(segLen - 2, d + jumpHalf);
+          prev.peakD = (prev.startD + prev.endD) / 2;
+        } else {
+          clusters.push({
+            startD: Math.max(2, d - jumpHalf),
+            peakD: d,
+            endD: Math.min(segLen - 2, d + jumpHalf),
+          });
+        }
+      }
+
+      const ux = dx / segLen;
+      const uy = dy / segLen;
+      // Consistent outward normal: horizontal jumps UP (ny < 0), vertical jumps RIGHT (nx > 0)
+      let nx = uy;
+      let ny = -ux;
+      if (Math.abs(ux) >= Math.abs(uy)) {
+        if (ny > 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+      } else if (nx < 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+
+      for (const cl of clusters) {
+        jumped.push(
+          { x: p1.x + ux * cl.startD, y: p1.y + uy * cl.startD },
+          {
+            x: p1.x + ux * cl.peakD + nx * jumpHeight,
+            y: p1.y + uy * cl.peakD + ny * jumpHeight,
+          },
+          { x: p1.x + ux * cl.endD, y: p1.y + uy * cl.endD },
+        );
+        hasAnyJump = true;
+      }
+
+      jumped.push(p2);
+    }
+
+    if (hasAnyJump) {
+      result.set(upper.id, jumped);
+    }
+  }
+
+  return result;
+}

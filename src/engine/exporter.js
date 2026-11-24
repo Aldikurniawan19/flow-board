@@ -5,7 +5,7 @@ import { FONT_FAMILY_MAP } from '../constants/tokens.js';
 import { getElementBounds } from './geometry.js';
 import { buildSvgMarker } from './markers.js';
 import { getNormalizedRect } from './ports.js';
-import { computeConnectorPath } from './router.js';
+import { computeConnectorJumpPointsMap, computeConnectorPath } from './router.js';
 import {
   drawChalkElementsLayer,
   drawChalkboardBackground,
@@ -108,6 +108,7 @@ export async function exportToPngBlob(elements, options = {}) {
     });
 
   if (!renderedAsChalk) {
+    const jumpPointsMap = computeConnectorJumpPointsMap(elements, elementsById);
     for (const el of elements) {
       if (el.type === 'connector') continue;
       if (el.type === 'freehand') {
@@ -118,7 +119,15 @@ export async function exportToPngBlob(elements, options = {}) {
     }
     for (const el of elements) {
       if (el.type === 'connector') {
-        drawConnectorElement(ctx, el, elementsById, rc, false, isChalkboard);
+        drawConnectorElement(
+          ctx,
+          el,
+          elementsById,
+          rc,
+          false,
+          isChalkboard,
+          jumpPointsMap.get(el.id),
+        );
       }
     }
     for (const el of elements) {
@@ -246,12 +255,15 @@ export function exportToSvgString(elements, options = {}) {
     if (rot) parts.push('</g>');
   }
 
+  const svgJumpMap = computeConnectorJumpPointsMap(elements, elementsById);
   /** @type {string[]} */
   const svgLabels = [];
   for (const el of elements) {
     if (el.type !== 'connector') continue;
     const routed = computeConnectorPath(el, elementsById);
-    if (routed.points.length < 2) continue;
+    const drawPts = svgJumpMap.get(el.id) || routed.points;
+    const hasJumps = svgJumpMap.has(el.id);
+    if (drawPts.length < 2) continue;
     const stroke = escapeXml(el.strokeColor);
     const dash =
       el.strokeStyle === 'dashed'
@@ -260,15 +272,16 @@ export function exportToSvgString(elements, options = {}) {
           ? ' stroke-dasharray="2 5"'
           : '';
 
-    if (routed.cubic) {
+    if (routed.cubic && !hasJumps) {
       const { start, cp1, cp2, end } = routed.cubic;
       parts.push(
         `<path d="M ${start.x} ${start.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}" fill="none" stroke="${stroke}" stroke-width="${el.strokeWidth}"${dash} />`,
       );
     } else {
-      const pts = routed.points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      const pts = drawPts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      const join = hasJumps ? 'miter' : 'round';
       parts.push(
-        `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="${el.strokeWidth}" stroke-linejoin="round"${dash} />`,
+        `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="${el.strokeWidth}" stroke-linejoin="${join}" stroke-miterlimit="6"${dash} />`,
       );
     }
 

@@ -17,7 +17,7 @@ import {
   resolveBindingPoint,
 } from '../engine/ports.js';
 import { ElementSchema } from '../types/schema.js';
-import { computeConnectorPath } from '../engine/router.js';
+import { computeConnectorJumpPointsMap, computeConnectorPath } from '../engine/router.js';
 import {
   exportToSvgString,
   parseAndValidateBoardJson,
@@ -437,5 +437,56 @@ describe('360-degree symbol rotation', () => {
     // Locked or same-type elements return null cleanly
     expect(morphElementShape({ ...rect, locked: true }, 'ellipse')).toBeNull();
     expect(morphElementShape(rect, 'rectangle')).toBeNull();
+  });
+
+  it('inserts sharp triangular line jumps (/\\) on only one of two crossing connectors', () => {
+    /** @type {import('../types/schema.js').BoardElement} */
+    const vert = {
+      id: 'c-vert',
+      type: 'connector',
+      x: 200,
+      y: 100,
+      width: 0,
+      height: 200,
+      strokeColor: '#0F172A',
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness: 0,
+      opacity: 1,
+      seed: 1,
+      routing: 'straight',
+      startMarker: 'none',
+      endMarker: 'filled_arrow',
+    };
+    /** @type {import('../types/schema.js').BoardElement} */
+    const horiz = {
+      ...vert,
+      id: 'c-horiz',
+      x: 100,
+      y: 200,
+      width: 200,
+      height: 0,
+    };
+
+    const map = new Map([
+      [vert.id, vert],
+      [horiz.id, horiz],
+    ]);
+    const jumps = computeConnectorJumpPointsMap([vert, horiz], map);
+
+    // Lower connector stays straight; upper horizontal connector jumps cleanly over (200, 200)
+    expect(jumps.has(vert.id)).toBe(false);
+    const pts = jumps.get(horiz.id);
+    expect(pts).toBeDefined();
+    // [start(100,200), jumpStart(194,200), sharpApex(200,192.5), jumpEnd(206,200), end(300,200)]
+    expect(pts).toHaveLength(5);
+    expect(pts?.[2].x).toBeCloseTo(200, 1);
+    expect(pts?.[2].y).toBeCloseTo(192.5, 1);
+
+    // SVG export emits sharp miter-joined jump vertices
+    const svg = exportToSvgString([vert, horiz]);
+    expect(svg).toContain('stroke-linejoin="miter"');
+    expect(svg).toContain('200.0,192.5');
   });
 });
