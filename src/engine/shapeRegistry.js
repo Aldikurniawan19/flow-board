@@ -281,13 +281,13 @@ export const SHAPE_DEFINITIONS = [
     type: 'dfd_yd_process',
     label: 'Proses DFD (Yourdon)',
     category: 'dfd',
-    keywords: ['dfd', 'yourdon', 'demarco', 'bubble', 'oval', 'proses'],
-    defaultWidth: 164,
-    defaultHeight: 108,
+    keywords: ['dfd', 'yourdon', 'demarco', 'bubble', 'lingkaran', 'bulat', 'proses'],
+    defaultWidth: 136,
+    defaultHeight: 136,
     defaultText: 'Proses 1',
     defaultFill: '#DBEAFE',
     defaultExtra: { code: '1.0' },
-    preview: [{ kind: 'ellipse', props: { cx: 20, cy: 16, rx: 15, ry: 11 } }],
+    preview: [{ kind: 'circle', props: { cx: 20, cy: 16, r: 12 } }],
   },
   {
     type: 'dfd_yd_datastore',
@@ -806,6 +806,17 @@ export function morphElementShape(el, targetType) {
   }
   if (typeof extra.stereotype === 'string' && !el.stereotype) {
     patch.stereotype = extra.stereotype;
+  }
+
+  // Keep Yourdon-DeMarco Process as a perfect 1:1 circle centered on the previous shape
+  if (targetType === 'dfd_yd_process') {
+    const side = Math.max(def.defaultWidth, Math.round(Math.max(el.width, el.height)));
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+    patch.x = Math.round(cx - side / 2);
+    patch.y = Math.round(cy - side / 2);
+    patch.width = side;
+    patch.height = side;
   }
 
   return patch;

@@ -146,14 +146,18 @@ function assignSemanticDfdPositions(nodes, connectors) {
   for (const node of [...entities, ...centerNodes, ...stores]) {
     const maxSide = Math.max(leftDeg.get(node.id) || 0, rightDeg.get(node.id) || 0);
     if (maxSide >= 4) {
-      const neededH = Math.min(260, maxSide * 28 + 26);
+      const neededH = Math.min(240, maxSide * 28 + 26);
       if (node.height < neededH) {
         node.height = neededH;
-        // Keep Yourdon-DeMarco processes true horizontal ovals (wider than tall)
+        // Keep Yourdon-DeMarco processes strict 1:1 circles (bubbles) per textbook rules
         if (node.type === 'dfd_yd_process') {
-          node.width = Math.min(248, Math.max(node.width, Math.round(neededH * 1.28)));
+          node.width = neededH;
         }
       }
+    } else if (node.type === 'dfd_yd_process' && node.width !== node.height) {
+      const side = Math.max(node.width, node.height);
+      node.width = side;
+      node.height = side;
     }
   }
 
