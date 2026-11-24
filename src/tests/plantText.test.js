@@ -256,12 +256,31 @@ P7 <-[#2E7D32]- D7 : Rekap Insiden\\n& Klaim
     expect(connectors.some((c) => c.strokeColor === '#15803D')).toBe(true);
 
     // Verify clean 3-column corridor layout: Col 1 (Entities) < Col 2 (Processes) < Col 3 (Data Stores)
+    const minEntityLeft = Math.min(...entities.map((e) => e.x));
     const maxEntityRight = Math.max(...entities.map((e) => e.x + e.width));
     const minProcLeft = Math.min(...processes.map((p) => p.x));
     const maxProcRight = Math.max(...processes.map((p) => p.x + p.width));
     const minStoreLeft = Math.min(...stores.map((s) => s.x));
-    expect(minProcLeft - maxEntityRight).toBeGreaterThanOrEqual(300);
-    expect(minStoreLeft - maxProcRight).toBeGreaterThanOrEqual(300);
+    const maxStoreRight = Math.max(...stores.map((s) => s.x + s.width));
+    expect(minProcLeft - maxEntityRight).toBeGreaterThanOrEqual(350);
+    expect(minStoreLeft - maxProcRight).toBeGreaterThanOrEqual(350);
+
+    // Every single connector must stay strictly inside the 3-column footprint (no detours behind Entities/Stores!)
+    for (const c of connectors) {
+      const pts = [
+        { x: c.x, y: c.y },
+        ...(c.waypoints || []),
+        { x: c.x + c.width, y: c.y + c.height },
+      ];
+      for (const pt of pts) {
+        expect(pt.x, `Connector "${c.text}" must not detour behind Entities`).toBeGreaterThanOrEqual(
+          minEntityLeft - 2,
+        );
+        expect(pt.x, `Connector "${c.text}" must not detour behind Data Stores`).toBeLessThanOrEqual(
+          maxStoreRight + 2,
+        );
+      }
+    }
 
     for (const el of res.elements) {
       expect(ElementSchema.safeParse(el).success).toBe(true);

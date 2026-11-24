@@ -281,16 +281,13 @@ export const SHAPE_DEFINITIONS = [
     type: 'dfd_yd_process',
     label: 'Proses DFD (Yourdon)',
     category: 'dfd',
-    keywords: ['dfd', 'yourdon', 'demarco', 'bubble', 'proses'],
-    defaultWidth: 116,
-    defaultHeight: 116,
+    keywords: ['dfd', 'yourdon', 'demarco', 'bubble', 'oval', 'proses'],
+    defaultWidth: 164,
+    defaultHeight: 108,
     defaultText: 'Proses 1',
     defaultFill: '#DBEAFE',
     defaultExtra: { code: '1.0' },
-    preview: [
-      { kind: 'circle', props: { cx: 20, cy: 16, r: 12 } },
-      { kind: 'line', props: { x1: 10, y1: 12, x2: 30, y2: 12 } },
-    ],
+    preview: [{ kind: 'ellipse', props: { cx: 20, cy: 16, rx: 15, ry: 11 } }],
   },
   {
     type: 'dfd_yd_datastore',
@@ -1669,38 +1666,44 @@ export function drawShapeElement(ctx, rc, el) {
     }
 
     case 'dfd_yd_process': {
-      const rad = Math.min(r.width, r.height) / 2;
       if (useRough && rc) {
-        rc.circle(cx, cy, rad * 2, roughOpts(el));
+        rc.ellipse(cx, cy, r.width, r.height, roughOpts(el));
       } else {
         ctx.beginPath();
-        ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        ctx.ellipse(cx, cy, r.width / 2, r.height / 2, 0, 0, Math.PI * 2);
         paintPath(ctx, el);
       }
+
+      const insetX = Math.max(14, r.width * 0.12);
+      const insetY = Math.max(12, r.height * 0.14);
+      const innerW = Math.max(24, r.width - insetX * 2);
+      const innerH = Math.max(24, r.height - insetY * 2);
+
       if (el.code) {
-        const lineY = cy - rad * 0.42;
-        const chordHalf = Math.sqrt(Math.max(0, rad * rad - (lineY - cy) ** 2));
-        if (useRough && rc) {
-          rc.line(cx - chordHalf, lineY, cx + chordHalf, lineY, { ...roughOpts(el), fill: undefined, strokeWidth: 1.25 });
-        } else {
-          ctx.beginPath();
-          ctx.moveTo(cx - chordHalf, lineY);
-          ctx.lineTo(cx + chordHalf, lineY);
-          ctx.strokeStyle = el.strokeColor;
-          ctx.lineWidth = 1.25;
-          ctx.stroke();
-        }
-        drawBoxText(ctx, el.code, cx - chordHalf, r.y + 2, chordHalf * 2, lineY - r.y, {
-          fontSize: 11,
-          fontFamily: el.fontFamily === 'sketch' ? 'sketch' : 'mono',
-          bold: true,
+        const fontSize = el.fontSize || 13;
+        const family = FONT_FAMILY_MAP[el.fontFamily || 'sans'];
+        ctx.save();
+        ctx.font = `500 ${fontSize}px ${family}`;
+        const bodyLines = wrapTextLines(ctx, el.text || '', innerW);
+        const codeH = 18;
+        const gap = bodyLines.length > 0 ? 4 : 0;
+        const bodyLineH = fontSize * 1.3;
+        const totalH = codeH + gap + bodyLines.length * bodyLineH;
+        const startY = cy - totalH / 2;
+
+        ctx.fillStyle = '#0F172A';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `700 ${Math.min(13, fontSize)}px ${family}`;
+        ctx.fillText(el.code, cx, startY + codeH / 2);
+
+        ctx.font = `500 ${fontSize}px ${family}`;
+        bodyLines.forEach((line, idx) => {
+          ctx.fillText(line, cx, startY + codeH + gap + bodyLineH / 2 + idx * bodyLineH);
         });
-        drawBoxText(ctx, el.text || '', r.x + 8, lineY, r.width - 16, r.y + r.height - lineY - 4, {
-          fontSize: el.fontSize,
-          fontFamily: el.fontFamily,
-        });
+        ctx.restore();
       } else {
-        drawBoxText(ctx, el.text || '', r.x + 8, r.y + 8, r.width - 16, r.height - 16, {
+        drawBoxText(ctx, el.text || '', r.x + insetX, r.y + insetY, innerW, innerH, {
           fontSize: el.fontSize,
           fontFamily: el.fontFamily,
         });

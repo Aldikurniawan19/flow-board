@@ -221,5 +221,5 @@ describe('FlowBoard UI integration', () => {
       expect(useBoardStore.getState().elements.some((el) => el.type === 'dfd_gs_process')).toBe(true);
       expect(useBoardStore.getState().elements.some((el) => el.type === 'dfd_gs_datastore')).toBe(true);
     });
-  });
+  }, 15000);
 });

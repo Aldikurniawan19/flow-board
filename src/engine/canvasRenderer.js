@@ -93,13 +93,61 @@ export function drawFreehandElement(ctx, el) {
 }
 
 /**
+ * Render a connector's label pill (drawn in a dedicated top pass so wires never slice through text).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {import('../types/schema.js').BoardElement} el
+ * @param {Map<string, import('../types/schema.js').BoardElement>} elementsById
+ */
+export function drawConnectorLabel(ctx, el, elementsById) {
+  if (!el.text || !el.text.trim()) return;
+  const routed = computeConnectorPath(el, elementsById);
+  if (routed.points.length < 2) return;
+
+  ctx.save();
+  ctx.globalAlpha = el.opacity;
+  const fontSize = Math.min(el.fontSize || 11, 11.5);
+  const family = FONT_FAMILY_MAP[el.fontFamily || 'sans'];
+  ctx.setLineDash([]);
+  ctx.font = `500 ${fontSize}px ${family}`;
+
+  const lines = wrapTextLines(ctx, el.text.trim(), 158);
+  const lineH = fontSize * 1.28;
+  const maxLineW = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
+  const padX = 6;
+  const padY = 3;
+  const boxW = maxLineW + padX * 2;
+  const boxH = lines.length * lineH + padY * 2;
+  const bx = routed.labelPosition.x - boxW / 2;
+  const by = routed.labelPosition.y - boxH / 2;
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.strokeStyle = '#E2E8F0';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect?.(bx, by, boxW, boxH, 4);
+  if (!ctx.roundRect) ctx.rect(bx, by, boxW, boxH);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#0F172A';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, idx) => {
+    const ly = by + padY + lineH / 2 + idx * lineH;
+    ctx.fillText(line, routed.labelPosition.x, ly);
+  });
+  ctx.restore();
+}
+
+/**
  * Render a connector (straight, orthogonal elbow, or curved) with markers and optional midpoint label.
  * @param {CanvasRenderingContext2D} ctx
  * @param {import('../types/schema.js').BoardElement} el
  * @param {Map<string, import('../types/schema.js').BoardElement>} elementsById
  * @param {any} [rc] Optional RoughCanvas instance for Sketch mode
+ * @param {boolean} [drawLabel] Pass false when labels are drawn in a dedicated top pass
  */
-export function drawConnectorElement(ctx, el, elementsById, rc) {
+export function drawConnectorElement(ctx, el, elementsById, rc, drawLabel = true) {
   const routed = computeConnectorPath(el, elementsById);
   if (routed.points.length < 2) return;
 
@@ -149,42 +197,11 @@ export function drawConnectorElement(ctx, el, elementsById, rc) {
   const last = routed.points[routed.points.length - 1];
   drawCanvasMarker(ctx, first, routed.startAngle, el.startMarker, el.strokeColor, el.strokeWidth);
   drawCanvasMarker(ctx, last, routed.endAngle, el.endMarker, el.strokeColor, el.strokeWidth);
-
-  if (el.text && el.text.trim()) {
-    const fontSize = Math.min(el.fontSize || 11, 14);
-    const family = FONT_FAMILY_MAP[el.fontFamily || 'sans'];
-    ctx.setLineDash([]);
-    ctx.font = `500 ${fontSize}px ${family}`;
-
-    const lines = wrapTextLines(ctx, el.text.trim(), 144);
-    const lineH = fontSize * 1.3;
-    const maxLineW = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
-    const padX = 6;
-    const padY = 3;
-    const boxW = maxLineW + padX * 2;
-    const boxH = lines.length * lineH + padY * 2;
-    const bx = routed.labelPosition.x - boxW / 2;
-    const by = routed.labelPosition.y - boxH / 2;
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.strokeStyle = '#CBD5E1';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect?.(bx, by, boxW, boxH, 4);
-    if (!ctx.roundRect) ctx.rect(bx, by, boxW, boxH);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#0F172A';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    lines.forEach((line, idx) => {
-      const ly = by + padY + lineH / 2 + idx * lineH;
-      ctx.fillText(line, routed.labelPosition.x, ly);
-    });
-  }
-
   ctx.restore();
+
+  if (drawLabel) {
+    drawConnectorLabel(ctx, el, elementsById);
+  }
 }
 
 /**
@@ -237,9 +254,17 @@ export function renderCanvasScene(canvas, state) {
     }
   }
 
+  // Pass 2: Connector lines & arrowheads
   for (const el of state.elements) {
     if (el.type === 'connector') {
-      drawConnectorElement(ctx, el, elementsById, rc);
+      drawConnectorElement(ctx, el, elementsById, rc, false);
+    }
+  }
+
+  // Pass 3: Connector labels strictly on top so wires never slice through text
+  for (const el of state.elements) {
+    if (el.type === 'connector') {
+      drawConnectorLabel(ctx, el, elementsById);
     }
   }
 

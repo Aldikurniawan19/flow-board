@@ -142,30 +142,30 @@ function assignSemanticDfdPositions(nodes, connectors) {
     }
   }
 
-  // Gently scale node height only when many flows attach to one side so arrows never crowd together
+  // Scale node height for high-degree nodes so parallel corridor wires & labels have ample vertical space
   for (const node of [...entities, ...centerNodes, ...stores]) {
     const maxSide = Math.max(leftDeg.get(node.id) || 0, rightDeg.get(node.id) || 0);
-    if (maxSide >= 5) {
-      const neededH = Math.min(200, maxSide * 22 + 26);
+    if (maxSide >= 4) {
+      const neededH = Math.min(260, maxSide * 28 + 26);
       if (node.height < neededH) {
         node.height = neededH;
-        // Keep Yourdon-DeMarco circles proportional
-        if (node.type === 'dfd_yd_process' && node.width < neededH + 16) {
-          node.width = Math.min(220, neededH + 16);
+        // Keep Yourdon-DeMarco processes true horizontal ovals (wider than tall)
+        if (node.type === 'dfd_yd_process') {
+          node.width = Math.min(248, Math.max(node.width, Math.round(neededH * 1.28)));
         }
       }
     }
   }
 
-  const procGap = centerNodes.length >= 6 ? 104 : 86;
+  const procGap = centerNodes.length >= 6 ? 124 : 96;
   const col1X = 80;
   const maxEntityW = entities.reduce((m, e) => Math.max(m, e.width), 164);
   const maxProcW = centerNodes.reduce((m, p) => Math.max(m, p.width), 184);
 
   const leftCorridor =
-    entities.length > 0 ? Math.max(340, Math.min(540, 260 + leftCorridorFlows * 11)) : 0;
+    entities.length > 0 ? Math.max(420, Math.min(620, 340 + leftCorridorFlows * 11)) : 0;
   const rightCorridor =
-    stores.length > 0 ? Math.max(340, Math.min(540, 260 + rightCorridorFlows * 11)) : 0;
+    stores.length > 0 ? Math.max(420, Math.min(620, 340 + rightCorridorFlows * 11)) : 0;
   const col2X = entities.length > 0 ? col1X + maxEntityW + leftCorridor : 120;
   const col3X = col2X + maxProcW + rightCorridor;
 
@@ -528,19 +528,47 @@ function distributeConnectorPorts(connectors, nodeById, direction) {
     });
   }
 
-  for (const slots of groups.values()) {
+  const ELLIPSE_PORT_TYPES = new Set([
+    'ellipse',
+    'uml_usecase',
+    'dfd_yd_process',
+    'erd_chen_attribute',
+    'erd_chen_key_attr',
+    'erd_chen_multi_attr',
+    'erd_chen_derived_attr',
+  ]);
+
+  for (const [groupKey, slots] of groups.entries()) {
     // Deterministic tie-break by connector.id ensures bidirectional pairs (A->B and B->A)
     // occupy matching vertical positions on both endpoints and NEVER cross each other!
     slots.sort((a, b) => {
       if (Math.abs(a.sortKey - b.sortKey) > 1) return a.sortKey - b.sortKey;
       return a.connector.id.localeCompare(b.connector.id);
     });
+    const nodeId = groupKey.slice(0, groupKey.lastIndexOf(':'));
+    const ownerNode = nodeById.get(nodeId);
+    const isOval = Boolean(ownerNode && ELLIPSE_PORT_TYPES.has(ownerNode.type));
     const n = slots.length;
 
     slots.forEach((slot, idx) => {
-      const t = n === 1 ? 0.5 : 0.14 + (idx / (n - 1)) * 0.72;
-      const rx = slot.side === 'left' ? 0 : slot.side === 'right' ? 1 : t;
-      const ry = slot.side === 'top' ? 0 : slot.side === 'bottom' ? 1 : t;
+      const margin = isOval ? 0.18 : 0.14;
+      const t = n === 1 ? 0.5 : margin + (idx / (n - 1)) * (1 - margin * 2);
+      let rx = slot.side === 'left' ? 0 : slot.side === 'right' ? 1 : t;
+      let ry = slot.side === 'top' ? 0 : slot.side === 'bottom' ? 1 : t;
+
+      // Project onto exact ellipse perimeter so arrows touch the curved oval edge with zero gap
+      if (isOval) {
+        if (slot.side === 'left' || slot.side === 'right') {
+          const dyNorm = (ry - 0.5) * 2;
+          const dxHalf = 0.5 * Math.sqrt(Math.max(0, 1 - dyNorm * dyNorm));
+          rx = slot.side === 'left' ? 0.5 - dxHalf : 0.5 + dxHalf;
+        } else {
+          const dxNorm = (rx - 0.5) * 2;
+          const dyHalf = 0.5 * Math.sqrt(Math.max(0, 1 - dxNorm * dxNorm));
+          ry = slot.side === 'top' ? 0.5 - dyHalf : 0.5 + dyHalf;
+        }
+      }
+
       const binding = slot.which === 'start' ? slot.connector.startBinding : slot.connector.endBinding;
       if (binding) {
         binding.rx = Math.round(rx * 1000) / 1000;
@@ -820,15 +848,18 @@ function routeObstacleAvoidingOrtho(start, end, startSide, endSide, obstacles, i
 
 /**
  * Stage 4: Separate any remaining overlapping parallel interior segments (edge nudging).
+ * Skips connectors already cleanly lane-assigned by the Left-Edge Corridor Router.
  * @param {Array<{ connector: import('../types/schema.js').BoardElement, path: Pt[] }>} routedList
  * @param {Array<{ id: string, rect: Rect }>} obstacles
+ * @param {Set<string>} [skipIds]
  */
-function nudgeParallelSegments(routedList, obstacles) {
+function nudgeParallelSegments(routedList, obstacles, skipIds = new Set()) {
   const gap = 18;
   /** @type {Array<{ idx: number, segIdx: number, axis: 'x' | 'y', coord: number, min: number, max: number }>} */
   const interiorSegs = [];
 
   routedList.forEach((item, idx) => {
+    if (skipIds.has(item.connector.id)) return;
     const pts = item.path;
     for (let s = 1; s < pts.length - 2; s += 1) {
       const a = pts[s];
@@ -904,23 +935,23 @@ function nudgeParallelSegments(routedList, obstacles) {
 }
 
 /**
- * Estimate wrapped connector label pill dimensions (matching canvasRenderer wrap width 144px).
+ * Estimate wrapped connector label pill dimensions (matching canvasRenderer wrap width 158px).
  * @param {string} text
  * @returns {{ width: number, height: number }}
  */
 function estimateLabelSize(text) {
   const clean = text.trim();
-  const maxCharsPerLine = 22;
+  const maxCharsPerLine = 25;
   const estLines = Math.max(1, Math.min(3, Math.ceil(clean.length / maxCharsPerLine)));
   const longest = Math.min(maxCharsPerLine, clean.length);
   return {
-    width: Math.max(44, longest * 6.4 + 14),
-    height: estLines * 14.5 + 8,
+    width: Math.max(44, longest * 6.0 + 14),
+    height: estLines * 14.2 + 8,
   };
 }
 
 /**
- * Stage 5: Non-overlapping label placement along each connector's longest clear segment.
+ * Stage 5: Non-overlapping, wire-crossing-aware label placement along clear horizontal/vertical arms.
  * @param {Array<{ connector: import('../types/schema.js').BoardElement, path: Pt[] }>} routedList
  * @param {Array<{ id: string, rect: Rect }>} obstacles
  */
@@ -929,7 +960,31 @@ function placeConnectorLabelsCleanly(routedList, obstacles) {
   const occupiedLabels = [];
   const nodeBoxes = obstacles.map((o) => o.rect);
 
-  for (const { connector, path } of routedList) {
+  /** @type {Array<{ ownerIdx: number, a: Pt, b: Pt }>} */
+  const allWireSegs = [];
+  routedList.forEach(({ path }, ownerIdx) => {
+    for (let i = 0; i < path.length - 1; i += 1) {
+      allWireSegs.push({ ownerIdx, a: path[i], b: path[i + 1] });
+    }
+  });
+
+  // Process connectors with shorter horizontal arms first so tighter wires claim clear pockets first
+  const order = routedList
+    .map((entry, idx) => {
+      let maxHoriz = 0;
+      for (let i = 0; i < entry.path.length - 1; i += 1) {
+        const a = entry.path[i];
+        const b = entry.path[i + 1];
+        if (Math.abs(a.y - b.y) < 1) {
+          maxHoriz = Math.max(maxHoriz, Math.abs(b.x - a.x));
+        }
+      }
+      return { entry, idx, maxHoriz };
+    })
+    .sort((a, b) => a.maxHoriz - b.maxHoriz);
+
+  for (const { entry, idx: ownerIdx } of order) {
+    const { connector, path } = entry;
     if (!connector.text || !connector.text.trim() || path.length < 2) {
       connector.labelPos = null;
       continue;
@@ -937,33 +992,72 @@ function placeConnectorLabelsCleanly(routedList, obstacles) {
 
     const size = estimateLabelSize(connector.text);
 
-    // Rank segments: prefer longer horizontal segments (horizontal text sits best on horizontal tracks)
-    /** @type {Array<{ a: Pt, b: Pt, len: number, score: number }>} */
+    // Collect all meaningful segments, prioritizing clear horizontal arms (both left & right of vertical bus)
+    /** @type {Array<{ a: Pt, b: Pt, len: number, isHoriz: boolean, score: number }>} */
     const segs = [];
     for (let i = 0; i < path.length - 1; i += 1) {
       const a = path[i];
       const b = path[i + 1];
       const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len < 24) continue;
       const isHoriz = Math.abs(a.y - b.y) < 1;
-      segs.push({ a, b, len, score: len * (isHoriz ? 1.35 : 1) });
+      segs.push({ a, b, len, isHoriz, score: len * (isHoriz ? 1.6 : 0.85) });
+    }
+    if (segs.length === 0) {
+      segs.push({
+        a: path[0],
+        b: path[path.length - 1],
+        len: Math.hypot(path[path.length - 1].x - path[0].x, path[path.length - 1].y - path[0].y),
+        isHoriz: true,
+        score: 1,
+      });
     }
     segs.sort((s1, s2) => s2.score - s1.score);
 
-    /** @type {Pt[]} */
+    /** @type {Array<{ x: number, y: number, basePenalty: number }>} */
     const candidates = [];
-    const ratios = [0.5, 0.32, 0.68, 0.18, 0.82];
+    const ratios = [0.5, 0.34, 0.66, 0.2, 0.8, 0.12, 0.88];
+
     for (const seg of segs.slice(0, 4)) {
-      const isHoriz = Math.abs(seg.a.y - seg.b.y) < 1;
+      const vertPen = seg.isHoriz ? 0 : 75;
       for (const t of ratios) {
         const px = seg.a.x + (seg.b.x - seg.a.x) * t;
         const py = seg.a.y + (seg.b.y - seg.a.y) * t;
-        candidates.push({ x: px, y: py });
-        if (isHoriz) {
-          candidates.push({ x: px, y: py - size.height * 0.68 });
-          candidates.push({ x: px, y: py + size.height * 0.68 });
+        // Slight preference for centered-on-wire placement
+        const offCenterPen = Math.abs(t - 0.5) * 18;
+        candidates.push({ x: px, y: py, basePenalty: vertPen + offCenterPen });
+        if (seg.isHoriz) {
+          candidates.push({
+            x: px,
+            y: py - (size.height * 0.58 + 4),
+            basePenalty: vertPen + offCenterPen + 28,
+          });
+          candidates.push({
+            x: px,
+            y: py + (size.height * 0.58 + 4),
+            basePenalty: vertPen + offCenterPen + 28,
+          });
+          candidates.push({
+            x: px,
+            y: py - (size.height * 1.12 + 6),
+            basePenalty: vertPen + offCenterPen + 56,
+          });
+          candidates.push({
+            x: px,
+            y: py + (size.height * 1.12 + 6),
+            basePenalty: vertPen + offCenterPen + 56,
+          });
         } else {
-          candidates.push({ x: px - size.width * 0.42, y: py });
-          candidates.push({ x: px + size.width * 0.42, y: py });
+          candidates.push({
+            x: px - (size.width * 0.45 + 6),
+            y: py,
+            basePenalty: vertPen + offCenterPen + 30,
+          });
+          candidates.push({
+            x: px + (size.width * 0.45 + 6),
+            y: py,
+            basePenalty: vertPen + offCenterPen + 30,
+          });
         }
       }
     }
@@ -978,17 +1072,27 @@ function placeConnectorLabelsCleanly(routedList, obstacles) {
         width: size.width,
         height: size.height,
       };
-      let score = 0;
+      const paddedWireRect = {
+        x: rect.x - 3,
+        y: rect.y - 3,
+        width: rect.width + 6,
+        height: rect.height + 6,
+      };
+      let score = cand.basePenalty;
       for (const nb of nodeBoxes) {
-        if (rectsOverlap(rect, nb, 4)) score += 1000;
+        if (rectsOverlap(rect, nb, 6)) score += 3000;
       }
       for (const lb of occupiedLabels) {
-        if (rectsOverlap(rect, lb, 4)) score += 600;
+        if (rectsOverlap(rect, lb, 5)) score += 1500;
+      }
+      for (const seg of allWireSegs) {
+        if (seg.ownerIdx === ownerIdx) continue;
+        if (orthoSegmentHitsRect(seg.a, seg.b, paddedWireRect)) score += 320;
       }
       if (score < bestScore) {
         bestScore = score;
         chosen = cand;
-        if (score === 0) break;
+        if (score < 12) break;
       }
     }
 
@@ -1082,34 +1186,56 @@ function routeClearCorridorChannels(connectors, nodeById, obstacles) {
     const corrMaxX = Math.max(start.x, end.x);
     const yMin = Math.min(start.y, end.y);
     const yMax = Math.max(start.y, end.y);
+    const midX = (corrMinX + corrMaxX) / 2;
 
-    // Ensure the corridor box between start and end contains NO intermediate obstacle nodes
-    const corridorBox = {
-      x: corrMinX + 18,
-      y: yMin - 10,
-      width: corrMaxX - corrMinX - 36,
-      height: Math.max(20, yMax - yMin + 20),
-    };
-    const hasObstacleInCorridor = obstacles.some(
-      (o) => !ignore.has(o.id) && rectsOverlap(corridorBox, o.rect, 4),
-    );
-    if (hasObstacleInCorridor) continue;
+    // Trim corridor margins against protruding neighbor nodes in the left/right columns.
+    // Only reject if an obstacle truly sits IN THE MIDDLE of the corridor (e.g. skip-column edge).
+    let clearMinX = corrMinX + 20;
+    let clearMaxX = corrMaxX - 20;
+    let blockedMiddle = false;
+
+    for (const o of obstacles) {
+      if (ignore.has(o.id)) continue;
+      if (o.rect.y + o.rect.height < yMin - 10 || o.rect.y > yMax + 10) continue;
+      const oRight = o.rect.x + o.rect.width;
+      if (oRight <= corrMinX + 2 || o.rect.x >= corrMaxX - 2) continue;
+
+      if (oRight < midX - 24) {
+        clearMinX = Math.max(clearMinX, oRight + 18);
+      } else if (o.rect.x > midX + 24) {
+        clearMaxX = Math.min(clearMaxX, o.rect.x - 18);
+      } else {
+        blockedMiddle = true;
+        break;
+      }
+    }
+    if (blockedMiddle || clearMaxX - clearMinX < 48) continue;
 
     if (Math.abs(start.y - end.y) < 3) {
       routed.set(conn.id, simplifyOrthoPath([start, end]));
       continue;
     }
 
-    const bucketKey = Math.round(((corrMinX + corrMaxX) / 2) / 140);
+    const bucketKey = Math.round(((clearMinX + clearMaxX) / 2) / 160);
     if (!buckets.has(bucketKey)) buckets.set(bucketKey, []);
-    buckets.get(bucketKey)?.push({ conn, start, end, corrMinX, corrMaxX, yMin, yMax, ignore });
+    buckets.get(bucketKey)?.push({
+      conn,
+      start,
+      end,
+      corrMinX: clearMinX,
+      corrMaxX: clearMaxX,
+      yMin,
+      yMax,
+      ignore,
+    });
   }
 
   for (const list of buckets.values()) {
     if (list.length === 0) continue;
-    const safeMinX = Math.max(...list.map((e) => e.corrMinX)) + 34;
-    const safeMaxX = Math.min(...list.map((e) => e.corrMaxX)) - 34;
-    if (safeMaxX - safeMinX < 24) continue;
+    const safeMinX = Math.max(...list.map((e) => e.corrMinX)) + 14;
+    const safeMaxX = Math.min(...list.map((e) => e.corrMaxX)) - 14;
+    const availW = safeMaxX - safeMinX;
+    if (availW < 24) continue;
 
     // Left-Edge interval coloring: pack non-overlapping vertical spans into minimal distinct lanes
     const sorted = [...list].sort((a, b) => {
@@ -1121,34 +1247,66 @@ function routeClearCorridorChannels(connectors, nodeById, obstacles) {
     const lanes = [];
     /** @type {Array<{ edge: CorridorEdge, laneIdx: number }>} */
     const assignments = [];
+    /** @type {Array<{ leftY: number, rightY: number, laneIdx: number }>} */
+    const placedArms = [];
 
     for (const edge of sorted) {
       const padMin = edge.yMin - 8;
       const padMax = edge.yMax + 8;
+      const leftY = edge.start.x < edge.end.x ? edge.start.y : edge.end.y;
+      const rightY = edge.start.x < edge.end.x ? edge.end.y : edge.start.y;
+
       let chosenLane = -1;
+      let bestConflictScore = Infinity;
+
       for (let l = 0; l < lanes.length; l += 1) {
-        const conflict = lanes[l].some(
+        const vertConflict = lanes[l].some(
           (iv) => Math.min(iv.yMax, padMax) - Math.max(iv.yMin, padMin) > 0,
         );
-        if (!conflict) {
+        if (vertConflict) continue;
+
+        // Avoid placing a left arm at the same Y to the right of an existing right arm (or vice versa)
+        let armConflict = 0;
+        for (const p of placedArms) {
+          if (Math.abs(leftY - p.rightY) < 8 && l >= p.laneIdx) armConflict += 1;
+          if (Math.abs(rightY - p.leftY) < 8 && l <= p.laneIdx) armConflict += 1;
+        }
+        if (armConflict < bestConflictScore) {
+          bestConflictScore = armConflict;
           chosenLane = l;
-          break;
+          if (armConflict === 0) break;
         }
       }
-      if (chosenLane === -1) {
-        chosenLane = lanes.length;
-        lanes.push([]);
+
+      if (chosenLane === -1 || bestConflictScore > 0) {
+        // Prefer a fresh conflict-free lane when all existing lanes collide on a horizontal arm
+        const newLane = lanes.length;
+        let newArmConflict = 0;
+        for (const p of placedArms) {
+          if (Math.abs(leftY - p.rightY) < 8 && newLane >= p.laneIdx) newArmConflict += 1;
+        }
+        if (chosenLane === -1 || newArmConflict < bestConflictScore) {
+          chosenLane = newLane;
+          lanes.push([]);
+        }
       }
+
       lanes[chosenLane].push({ yMin: padMin, yMax: padMax });
       assignments.push({ edge, laneIdx: chosenLane });
+      placedArms.push({ leftY, rightY, laneIdx: chosenLane });
     }
 
+    // Pack vertical risers into a compact central Manhattan bus (14-18px pitch),
+    // leaving two wide vertical-wire-FREE label runways on the left and right sides of the bus!
     const totalLanes = lanes.length;
+    const centerBusX = (safeMinX + safeMaxX) / 2;
+    const maxBusW = Math.min(availW * 0.42, Math.max(availW - 220, availW * 0.28));
+    const lanePitch =
+      totalLanes <= 1 ? 0 : Math.min(18, Math.max(12, maxBusW / Math.max(1, totalLanes - 1)));
+    const busStartX = centerBusX - ((totalLanes - 1) * lanePitch) / 2;
+
     for (const { edge, laneIdx } of assignments) {
-      const laneX =
-        totalLanes === 1
-          ? (safeMinX + safeMaxX) / 2
-          : safeMinX + (laneIdx / (totalLanes - 1)) * (safeMaxX - safeMinX);
+      const laneX = Math.round((busStartX + laneIdx * lanePitch) * 10) / 10;
       const path = simplifyOrthoPath([
         edge.start,
         { x: laneX, y: edge.start.y },
@@ -1257,7 +1415,7 @@ export function routeConnectorsCleanly(elements, options = {}) {
     }
   }
 
-  nudgeParallelSegments(routedList, obstacles);
+  nudgeParallelSegments(routedList, obstacles, new Set(corridorRouted.keys()));
 
   for (const { connector, path } of routedList) {
     if (connector.routing === 'straight') continue;

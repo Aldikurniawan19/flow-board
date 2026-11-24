@@ -8,6 +8,7 @@ import { getNormalizedRect } from './ports.js';
 import { computeConnectorPath } from './router.js';
 import {
   drawConnectorElement,
+  drawConnectorLabel,
   drawFreehandElement,
   getSvgPathFromStroke,
 } from './canvasRenderer.js';
@@ -97,7 +98,12 @@ export async function exportToPngBlob(elements, options = {}) {
   }
   for (const el of elements) {
     if (el.type === 'connector') {
-      drawConnectorElement(ctx, el, elementsById, rc);
+      drawConnectorElement(ctx, el, elementsById, rc, false);
+    }
+  }
+  for (const el of elements) {
+    if (el.type === 'connector') {
+      drawConnectorLabel(ctx, el, elementsById);
     }
   }
 
@@ -213,6 +219,8 @@ export function exportToSvgString(elements, options = {}) {
     }
   }
 
+  /** @type {string[]} */
+  const svgLabels = [];
   for (const el of elements) {
     if (el.type !== 'connector') continue;
     const routed = computeConnectorPath(el, elementsById);
@@ -243,11 +251,12 @@ export function exportToSvgString(elements, options = {}) {
     parts.push(buildSvgMarker(last, routed.endAngle, el.endMarker, stroke, el.strokeWidth));
 
     if (el.text && el.text.trim()) {
-      parts.push(
-        `<text x="${routed.labelPosition.x}" y="${routed.labelPosition.y - 6}" text-anchor="middle" font-family="${escapeXml(FONT_FAMILY_MAP.sans)}" font-size="12" fill="#0F172A">${escapeXml(el.text)}</text>`,
+      svgLabels.push(
+        `<text x="${routed.labelPosition.x}" y="${routed.labelPosition.y - 6}" text-anchor="middle" font-family="${escapeXml(FONT_FAMILY_MAP.sans)}" font-size="11.5" fill="#0F172A">${escapeXml(el.text)}</text>`,
       );
     }
   }
+  parts.push(...svgLabels);
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" width="${bounds.width}" height="${bounds.height}">`,
