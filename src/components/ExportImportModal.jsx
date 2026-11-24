@@ -52,9 +52,8 @@ export function ExportImportModal({ open, onClose }) {
     setError('');
     setBusy(true);
     try {
-      const defaultBg = settings.renderMode === 'sketch' ? '#2D603D' : '#FFFFFF';
       const blob = await exportToPngBlob(elements, {
-        background: transparentBg ? 'transparent' : defaultBg,
+        background: transparentBg ? 'transparent' : '#FFFFFF',
         scale: 2,
       });
       triggerDownload(blob, `${safeSlug}.png`);
@@ -69,9 +68,8 @@ export function ExportImportModal({ open, onClose }) {
   function handleExportSvg() {
     setError('');
     try {
-      const defaultBg = settings.renderMode === 'sketch' ? '#2D603D' : '#FFFFFF';
       const svg = exportToSvgString(elements, {
-        background: transparentBg ? 'transparent' : defaultBg,
+        background: transparentBg ? 'transparent' : '#FFFFFF',
       });
       const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
       triggerDownload(blob, `${safeSlug}.svg`);

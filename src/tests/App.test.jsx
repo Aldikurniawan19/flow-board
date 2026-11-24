@@ -40,7 +40,13 @@ describe('FlowBoard UI integration', () => {
     expect(await screen.findByRole('heading', { name: 'FlowBoard' })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Alamat Email'), 'test@example.com');
-    await user.type(screen.getByLabelText('Kata Sandi'), 'wrongpass');
+    const pwdInput = screen.getByLabelText('Kata Sandi');
+    expect(pwdInput).toHaveAttribute('type', 'password');
+    await user.type(pwdInput, 'wrongpass');
+    await user.click(screen.getByRole('button', { name: 'Lihat kata sandi' }));
+    expect(pwdInput).toHaveAttribute('type', 'text');
+    await user.click(screen.getByRole('button', { name: 'Sembunyikan kata sandi' }));
+    expect(pwdInput).toHaveAttribute('type', 'password');
     await user.click(screen.getByRole('button', { name: 'Masuk ke FlowBoard' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Email atau kata sandi salah.');

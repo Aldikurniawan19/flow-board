@@ -1170,14 +1170,8 @@ export function WhiteboardCanvas() {
     }
   }
 
-  const isChalkboard = settings.renderMode === 'sketch';
-
   return (
-    <div
-      className={`relative flex-1 h-full overflow-hidden transition-colors duration-200 ${
-        isChalkboard ? 'bg-[#2D603D]' : 'bg-[#F8FAFC]'
-      }`}
-    >
+    <div className="relative flex-1 h-full overflow-hidden bg-[#F8FAFC]">
       <canvas
         ref={canvasRef}
         aria-label="Kanvas papan tulis FlowBoard"
@@ -1235,11 +1229,7 @@ export function WhiteboardCanvas() {
             height: `${editorStyle.height}px`,
             transform: editingEl.rotation ? `rotate(${editingEl.rotation}deg)` : undefined,
           }}
-          className={`absolute z-30 rounded-md border-2 px-2 py-1 text-center text-sm font-medium shadow-sm focus:outline-none resize-none ${
-            isChalkboard
-              ? 'border-[#B8D6FF] bg-[#2D603D]/95 text-[#F9FBF9]'
-              : 'border-[#1D4ED8] bg-[#FFFFFF]/95 text-[#0F172A]'
-          }`}
+          className="absolute z-30 rounded-md border-2 border-[#1D4ED8] bg-[#FFFFFF]/95 px-2 py-1 text-center text-sm font-medium text-[#0F172A] shadow-sm focus:outline-none resize-none"
         />
       )}
     </div>

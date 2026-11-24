@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertCircle, Layers, Loader2, Lock, Mail, User } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Layers, Loader2, Lock, Mail, User } from 'lucide-react';
 import { useBoardStore } from '../store/useBoardStore.js';
 
 export function AuthScreen() {
@@ -7,6 +7,7 @@ export function AuthScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -158,15 +159,29 @@ export function AuthScreen() {
               />
               <input
                 id="auth-password"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 minLength={mode === 'register' ? 8 : 1}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={mode === 'register' ? 'Minimal 8 karakter' : 'Masukkan kata sandi'}
                 autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-                className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] pl-9 pr-3 py-2 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/20"
+                className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] pl-9 pr-10 py-2 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/20"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Lihat kata sandi'}
+                aria-pressed={showPassword}
+                title={showPassword ? 'Sembunyikan kata sandi' : 'Lihat kata sandi'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                ) : (
+                  <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                )}
+              </button>
             </div>
           </div>
 
