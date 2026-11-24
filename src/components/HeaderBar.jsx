@@ -202,10 +202,17 @@ export function HeaderBar({ onOpenExport, onOpenPlantText }) {
         <button
           type="button"
           onClick={onOpenExport}
+          title="Simpan & Ekspor / Unduh Hasil (Ctrl+S)"
           className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
         >
           <Download className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
           <span className="hidden sm:inline">Ekspor / Impor</span>
+          <span
+            aria-hidden="true"
+            className="hidden md:inline rounded bg-white/15 px-1 py-0.5 text-[10px] font-mono-tabular leading-none"
+          >
+            Ctrl+S
+          </span>
         </button>
 
         {user && (

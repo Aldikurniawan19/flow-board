@@ -13,13 +13,13 @@ import { useBoardStore } from '../store/useBoardStore.js';
 
 /**
  * Render declarative SVG preview thumbnail for a shape definition.
- * @param {{ preview: import('../engine/shapeRegistry.js').PreviewPrimitive[] }} props
+ * @param {{ preview: import('../engine/shapeRegistry.js').PreviewPrimitive[], className?: string }} props
  */
-function ShapePreviewIcon({ preview }) {
+export function ShapePreviewIcon({ preview, className = 'w-9 h-7 shrink-0' }) {
   return (
     <svg
       viewBox="0 0 40 32"
-      className="w-9 h-7 shrink-0"
+      className={className}
       fill="none"
       stroke="currentColor"
       strokeWidth="1.5"

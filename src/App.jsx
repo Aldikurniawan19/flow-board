@@ -37,10 +37,21 @@ export function App() {
     if (authStatus !== 'authenticated') return undefined;
 
     /** @param {KeyboardEvent} e */
-    function handlePanelShortcuts(e) {
+    function handleAppShortcuts(e) {
+      const mod = e.ctrlKey || e.metaKey;
+
+      // Ctrl+S / Cmd+S: prevent browser Save Page dialog, save board to server, and open Export/Download dialog
+      if (mod && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        useBoardStore.getState().saveActiveBoard();
+        setPlantTextOpen(false);
+        setExportOpen(true);
+        return;
+      }
+
       const tag = /** @type {HTMLElement | null} */ (e.target)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (mod || e.altKey) return;
 
       if (e.key === '[') {
         e.preventDefault();
@@ -58,8 +69,8 @@ export function App() {
       }
     }
 
-    window.addEventListener('keydown', handlePanelShortcuts);
-    return () => window.removeEventListener('keydown', handlePanelShortcuts);
+    window.addEventListener('keydown', handleAppShortcuts);
+    return () => window.removeEventListener('keydown', handleAppShortcuts);
   }, [authStatus]);
 
   if (authStatus === 'loading') {

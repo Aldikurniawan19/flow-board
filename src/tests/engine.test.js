@@ -23,7 +23,7 @@ import {
   parseAndValidateBoardJson,
   serializeBoardToJson,
 } from '../engine/exporter.js';
-import { createElementFromShape } from '../engine/shapeRegistry.js';
+import { createElementFromShape, morphElementShape } from '../engine/shapeRegistry.js';
 import { recognizeFreehandShape } from '../engine/shapeRecognizer.js';
 import { buildErdTemplate } from '../constants/templates.js';
 
@@ -418,5 +418,24 @@ describe('360-degree symbol rotation', () => {
     // SVG export wraps rotated element in <g transform="rotate(90 200 120)">
     const svg = exportToSvgString([bar]);
     expect(svg).toContain('transform="rotate(90 200 120)"');
+  });
+
+  it('morphs a shape into another symbol while keeping id, text, rotation, and adding structural defaults', () => {
+    const rect = createElementFromShape('rectangle', 200, 150);
+    rect.text = 'Proses Pesanan';
+    rect.rotation = 30;
+
+    const toOval = morphElementShape(rect, 'dfd_yd_process');
+    expect(toOval).not.toBeNull();
+    expect(toOval?.type).toBe('dfd_yd_process');
+    expect(toOval?.code).toBe('1.0');
+
+    const toErd = morphElementShape(rect, 'erd_table');
+    expect(toErd?.type).toBe('erd_table');
+    expect(toErd?.fields?.length).toBeGreaterThan(0);
+
+    // Locked or same-type elements return null cleanly
+    expect(morphElementShape({ ...rect, locked: true }, 'ellipse')).toBeNull();
+    expect(morphElementShape(rect, 'rectangle')).toBeNull();
   });
 });

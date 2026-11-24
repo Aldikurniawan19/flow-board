@@ -764,6 +764,54 @@ export function createElementFromShape(type, cx, cy, options = {}) {
 }
 
 /**
+ * Convert an existing shape element into a different symbol type while preserving
+ * its ID, position, rotation, text, style, and bound connectors.
+ * @param {import('../types/schema.js').BoardElement} el
+ * @param {string} targetType
+ * @returns {Partial<import('../types/schema.js').BoardElement> | null}
+ */
+export function morphElementShape(el, targetType) {
+  if (el.locked || el.type === 'connector' || el.type === 'freehand') return null;
+  if (el.type === targetType) return null;
+  const def = SHAPE_MAP.get(targetType);
+  if (!def) return null;
+
+  /** @type {Partial<import('../types/schema.js').BoardElement>} */
+  const patch = { type: targetType };
+
+  const extra = def.defaultExtra || {};
+  if (extra.code && !el.code) {
+    patch.code = String(extra.code);
+  }
+  if (Array.isArray(extra.fields) && (!el.fields || el.fields.length === 0)) {
+    patch.fields = structuredClone(extra.fields);
+    if (el.height < def.defaultHeight) {
+      patch.height = def.defaultHeight;
+    }
+    if (el.width < def.defaultWidth) {
+      patch.width = def.defaultWidth;
+    }
+  }
+  if (Array.isArray(extra.attributes) && (!el.attributes || el.attributes.length === 0)) {
+    patch.attributes = structuredClone(extra.attributes);
+  }
+  if (Array.isArray(extra.methods) && (!el.methods || el.methods.length === 0)) {
+    patch.methods = structuredClone(extra.methods);
+    if (el.height < def.defaultHeight) {
+      patch.height = def.defaultHeight;
+    }
+    if (el.width < def.defaultWidth) {
+      patch.width = def.defaultWidth;
+    }
+  }
+  if (typeof extra.stereotype === 'string' && !el.stereotype) {
+    patch.stereotype = extra.stereotype;
+  }
+
+  return patch;
+}
+
+/**
  * Configure canvas dash pattern from StrokeStyle.
  * @param {CanvasRenderingContext2D} ctx
  * @param {import('../types/schema.js').StrokeStyle} style

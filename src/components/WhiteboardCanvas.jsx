@@ -20,8 +20,9 @@ import {
 } from '../engine/ports.js';
 import { computeConnectorPath } from '../engine/router.js';
 import { recognizeFreehandShape } from '../engine/shapeRecognizer.js';
-import { createElementFromShape } from '../engine/shapeRegistry.js';
+import { createElementFromShape, morphElementShape } from '../engine/shapeRegistry.js';
 import { useBoardStore } from '../store/useBoardStore.js';
+import { ShapeContextMenu } from './ShapeContextMenu.jsx';
 
 const TOOL_SHORTCUTS = {
   v: 'select',
@@ -55,6 +56,11 @@ export function WhiteboardCanvas() {
   );
   const [showPortsForId, setShowPortsForId] = useState(/** @type {string | null} */ (null));
   const [cursorStyle, setCursorStyle] = useState('default');
+  const [contextMenu, setContextMenu] = useState(
+    /** @type {{ x: number, y: number, currentType: string, selectedCount: number } | null} */ (
+      null
+    ),
+  );
 
   const elements = useBoardStore((s) => s.elements);
   const camera = useBoardStore((s) => s.camera);
@@ -288,6 +294,10 @@ export function WhiteboardCanvas() {
 
   /** @param {import('react').PointerEvent<HTMLCanvasElement>} e */
   function handlePointerDown(e) {
+    // Let onContextMenu handle right-click without altering selection or starting drag
+    if (e.button === 2) return;
+    if (contextMenu) setContextMenu(null);
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     canvas.setPointerCapture(e.pointerId);
@@ -1048,6 +1058,44 @@ export function WhiteboardCanvas() {
   }
 
   /** @param {import('react').MouseEvent<HTMLCanvasElement>} e */
+  function handleContextMenu(e) {
+    const store = useBoardStore.getState();
+    const screen = getScreenPoint(e);
+    const world = screenToWorld(screen.x, screen.y, store.camera);
+    const map = new Map(store.elements.map((el) => [el.id, el]));
+    const hit = findTopmostElementAtPoint(world, store.elements, map, 10 / store.camera.zoom);
+
+    if (!hit || hit.type === 'connector' || hit.type === 'freehand' || hit.locked) {
+      setContextMenu(null);
+      return;
+    }
+
+    e.preventDefault();
+    let targetIds = store.selectedIds;
+    if (!targetIds.includes(hit.id)) {
+      targetIds = [hit.id];
+      store.setSelectedIds(targetIds);
+    }
+
+    const swappableCount = targetIds.filter((id) => {
+      const el = map.get(id);
+      return el && el.type !== 'connector' && el.type !== 'freehand' && !el.locked;
+    }).length;
+
+    if (swappableCount === 0) {
+      setContextMenu(null);
+      return;
+    }
+
+    setContextMenu({
+      x: screen.x,
+      y: screen.y,
+      currentType: hit.type,
+      selectedCount: swappableCount,
+    });
+  }
+
+  /** @param {import('react').MouseEvent<HTMLCanvasElement>} e */
   function handleDoubleClick(e) {
     const store = useBoardStore.getState();
     const screen = getScreenPoint(e);
@@ -1131,6 +1179,7 @@ export function WhiteboardCanvas() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
         onDragOver={(e) => {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'copy';
@@ -1139,6 +1188,24 @@ export function WhiteboardCanvas() {
         style={{ cursor: cursorStyle, touchAction: 'none' }}
         className="block w-full h-full"
       />
+
+      {contextMenu && (
+        <ShapeContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          containerWidth={canvasRef.current?.clientWidth || 800}
+          containerHeight={canvasRef.current?.clientHeight || 600}
+          currentType={contextMenu.currentType}
+          selectedCount={contextMenu.selectedCount}
+          onSelectShape={(targetType) => {
+            useBoardStore
+              .getState()
+              .updateSelectedElements((el) => morphElementShape(el, targetType));
+            setContextMenu(null);
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
 
       {editingEl && editorStyle && (
         <textarea

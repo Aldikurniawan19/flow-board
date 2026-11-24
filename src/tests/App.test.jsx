@@ -221,5 +221,50 @@ describe('FlowBoard UI integration', () => {
       expect(useBoardStore.getState().elements.some((el) => el.type === 'dfd_gs_process')).toBe(true);
       expect(useBoardStore.getState().elements.some((el) => el.type === 'dfd_gs_datastore')).toBe(true);
     });
+
+    // Ctrl+S prevents native Save Page, saves board, and opens Export / Download dialog
+    const saveKeyEvent = new KeyboardEvent('keydown', {
+      key: 's',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      window.dispatchEvent(saveKeyEvent);
+    });
+    expect(saveKeyEvent.defaultPrevented).toBe(true);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText(/Ekspor & Impor Diagram/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Tutup dialog' }));
+
+    // Right-clicking a selected component opens the shape-switcher context menu and morphs its shape
+    const targetNode = useBoardStore.getState().elements.find((el) => el.type === 'dfd_gs_process');
+    expect(targetNode).toBeDefined();
+    if (targetNode) {
+      act(() => {
+        useBoardStore.getState().setSelectedIds([targetNode.id]);
+        useBoardStore.getState().setCamera({ x: 0, y: 0, zoom: 1 });
+      });
+      const canvas = screen.getByLabelText('Kanvas papan tulis FlowBoard');
+      const cx = targetNode.x + targetNode.width / 2;
+      const cy = targetNode.y + targetNode.height / 2;
+      act(() => {
+        canvas.dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: cx,
+            clientY: cy,
+            button: 2,
+          }),
+        );
+      });
+      expect(screen.getByRole('menu', { name: 'Ganti bentuk komponen' })).toBeInTheDocument();
+      await user.click(screen.getByRole('menuitem', { name: 'Proses DFD (Yourdon)' }));
+      const morphed = useBoardStore.getState().elements.find((el) => el.id === targetNode.id);
+      expect(morphed?.type).toBe('dfd_yd_process');
+      expect(morphed?.text).toBe(targetNode.text);
+      expect(screen.queryByRole('menu', { name: 'Ganti bentuk komponen' })).not.toBeInTheDocument();
+    }
   }, 15000);
 });
