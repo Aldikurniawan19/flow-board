@@ -8,6 +8,7 @@ import {
   PanelRightOpen,
   Plus,
   RotateCcw,
+  RotateCw,
   Trash2,
   Unlock,
   X,
@@ -17,6 +18,7 @@ import {
   CANVAS_STROKE_SWATCHES,
   STROKE_WIDTH_OPTIONS,
 } from '../constants/tokens.js';
+import { normalizeRotation } from '../engine/ports.js';
 import { useBoardStore } from '../store/useBoardStore.js';
 import { MarkerPicker } from './MarkerPicker.jsx';
 
@@ -99,6 +101,7 @@ export function InspectorPanel({ open, onToggle }) {
   const textElements = selectedElements.filter((e) => e.type !== 'freehand');
   const styleLineElements = selectedElements.filter((e) => e.type !== 'freehand' && e.type !== 'text');
   const renderableElements = selectedElements.filter((e) => e.type !== 'freehand');
+  const rotatableElements = selectedElements.filter((e) => e.type !== 'connector' && e.type !== 'freehand');
 
   const isConnectorOnly = primary?.type === 'connector';
   const isErdTable = primary?.type === 'erd_table' || primary?.type === 'erd_weak_table';
@@ -123,6 +126,7 @@ export function InspectorPanel({ open, onToggle }) {
   const sharedRouting = getSharedValue(connectorElements, (e) => e.routing || 'elbow');
   const sharedStartMarker = getSharedValue(connectorElements, (e) => e.startMarker || 'none');
   const sharedEndMarker = getSharedValue(connectorElements, (e) => e.endMarker || 'none');
+  const sharedRotation = getSharedValue(rotatableElements, (e) => normalizeRotation(e.rotation || 0));
 
   /** @param {string} id @param {import('../types/schema.js').ErdField[]} fields */
   function syncErdFields(id, fields) {
@@ -856,6 +860,139 @@ export function InspectorPanel({ open, onToggle }) {
                 </div>
               </div>
             </section>
+
+            {/* Rotation controls (works for single & multi-select shapes/symbols) */}
+            {rotatableElements.length > 0 && (
+              <section className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="prop-rotation-slider" className="font-semibold text-[#0F172A]">
+                    Rotasi Sudut
+                  </label>
+                  <div className="inline-flex items-center gap-1">
+                    <input
+                      id="prop-rotation-input"
+                      aria-label="Sudut rotasi dalam derajat"
+                      type="number"
+                      min={-360}
+                      max={360}
+                      step={1}
+                      value={typeof sharedRotation === 'number' ? Math.round(sharedRotation) : ''}
+                      placeholder="—"
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (!Number.isFinite(val)) return;
+                        const deg = normalizeRotation(val);
+                        updateSelectedElements((el) =>
+                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                            ? { rotation: deg }
+                            : null,
+                        );
+                      }}
+                      className="w-16 rounded-md border border-[#E2E8F0] px-1.5 py-0.5 text-right font-mono-tabular text-xs text-[#0F172A] focus:border-[#1D4ED8] focus:outline-none"
+                    />
+                    <span className="text-[#475569] font-mono-tabular">°</span>
+                  </div>
+                </div>
+                <input
+                  id="prop-rotation-slider"
+                  type="range"
+                  min={0}
+                  max={360}
+                  step={1}
+                  value={typeof sharedRotation === 'number' ? Math.round(sharedRotation) : 0}
+                  onChange={(e) => {
+                    const deg = normalizeRotation(Number(e.target.value));
+                    updateSelectedElements((el) =>
+                      el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                        ? { rotation: deg }
+                        : null,
+                    );
+                  }}
+                  className="w-full accent-[#1D4ED8] cursor-pointer"
+                />
+                <div className="grid grid-cols-5 gap-1">
+                  <button
+                    type="button"
+                    title="Putar 90° berlawanan jarum jam"
+                    onClick={() =>
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: normalizeRotation((el.rotation || 0) - 90) }
+                          : null,
+                      )
+                    }
+                    className="inline-flex items-center justify-center gap-0.5 py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
+                  >
+                    <RotateCcw className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                    <span>90</span>
+                  </button>
+                  <button
+                    type="button"
+                    title="Putar 45° berlawanan jarum jam"
+                    onClick={() =>
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: normalizeRotation((el.rotation || 0) - 45) }
+                          : null,
+                      )
+                    }
+                    className="py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
+                  >
+                    -45°
+                  </button>
+                  <button
+                    type="button"
+                    title="Reset rotasi ke 0°"
+                    onClick={() =>
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: 0 }
+                          : null,
+                      )
+                    }
+                    className={`py-1.5 rounded-md border font-mono-tabular font-medium ${
+                      sharedRotation === 0
+                        ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                        : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A]'
+                    }`}
+                  >
+                    0°
+                  </button>
+                  <button
+                    type="button"
+                    title="Putar 45° searah jarum jam"
+                    onClick={() =>
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: normalizeRotation((el.rotation || 0) + 45) }
+                          : null,
+                      )
+                    }
+                    className="py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
+                  >
+                    +45°
+                  </button>
+                  <button
+                    type="button"
+                    title="Putar 90° searah jarum jam"
+                    onClick={() =>
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: normalizeRotation((el.rotation || 0) + 90) }
+                          : null,
+                      )
+                    }
+                    className="inline-flex items-center justify-center gap-0.5 py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
+                  >
+                    <RotateCw className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                    <span>90</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#475569]">
+                  Seret titik bulat di atas komponen untuk memutar bebas (tahan Shift untuk snap 15°).
+                </p>
+              </section>
+            )}
 
             {/* Layer order (works for single & multi-select) */}
             <section className="space-y-2 pt-2 border-t border-[#E2E8F0]">

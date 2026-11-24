@@ -43,22 +43,83 @@ export function getNormalizedRect(el) {
 }
 
 /**
- * Return the 4 cardinal reference ports (top, right, bottom, left) of an element.
+ * Normalize an angle in degrees into [0, 360).
+ * @param {number} [deg]
+ * @returns {number}
+ */
+export function normalizeRotation(deg = 0) {
+  if (!Number.isFinite(deg)) return 0;
+  const rounded = Math.round(deg * 10) / 10;
+  const norm = ((rounded % 360) + 360) % 360;
+  return norm === 360 ? 0 : norm;
+}
+
+/**
+ * Rotate a 2D point clockwise by angleDeg around a center point (Canvas Y-down coordinates).
+ * @param {{ x: number, y: number }} pt
+ * @param {{ x: number, y: number }} center
+ * @param {number} angleDeg
+ * @returns {{ x: number, y: number }}
+ */
+export function rotatePoint(pt, center, angleDeg) {
+  if (!angleDeg) return { x: pt.x, y: pt.y };
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = pt.x - center.x;
+  const dy = pt.y - center.y;
+  return {
+    x: center.x + dx * cos - dy * sin,
+    y: center.y + dx * sin + dy * cos,
+  };
+}
+
+/**
+ * Inverse-rotate a 2D world point into local unrotated shape space.
+ * @param {{ x: number, y: number }} pt
+ * @param {{ x: number, y: number }} center
+ * @param {number} angleDeg
+ * @returns {{ x: number, y: number }}
+ */
+export function unrotatePoint(pt, center, angleDeg) {
+  return rotatePoint(pt, center, -angleDeg);
+}
+
+/**
+ * Map a local PortSide to the nearest world cardinal PortSide after rotation.
+ * @param {import('../types/schema.js').PortSide} side
+ * @param {number} angleDeg
+ * @returns {import('../types/schema.js').PortSide}
+ */
+export function rotatePortSide(side, angleDeg) {
+  if (!angleDeg) return side;
+  /** @type {import('../types/schema.js').PortSide[]} */
+  const order = ['top', 'right', 'bottom', 'left'];
+  const idx = order.indexOf(side);
+  if (idx < 0) return side;
+  const steps = Math.round(normalizeRotation(angleDeg) / 90) % 4;
+  return order[(idx + steps) % 4];
+}
+
+/**
+ * Return the 4 cardinal reference ports (top, right, bottom, left) of an element (rotation-aware).
  * @param {import('../types/schema.js').BoardElement} el
  * @returns {Record<import('../types/schema.js').PortSide, { x: number, y: number }>}
  */
 export function getShapePorts(el) {
   const r = getNormalizedRect(el);
+  const center = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  const rot = el.rotation || 0;
   return {
-    top: { x: r.x + r.width / 2, y: r.y },
-    right: { x: r.x + r.width, y: r.y + r.height / 2 },
-    bottom: { x: r.x + r.width / 2, y: r.y + r.height },
-    left: { x: r.x, y: r.y + r.height / 2 },
+    top: rotatePoint({ x: center.x, y: r.y }, center, rot),
+    right: rotatePoint({ x: r.x + r.width, y: center.y }, center, rot),
+    bottom: rotatePoint({ x: center.x, y: r.y + r.height }, center, rot),
+    left: rotatePoint({ x: r.x, y: center.y }, center, rot),
   };
 }
 
 /**
- * Resolve a connector AnchorBinding to exact world coordinates on an element.
+ * Resolve a connector AnchorBinding to exact world coordinates on an element (rotation-aware).
  * Supports continuous normalized (rx, ry) anchors and stays compatible with side-only bindings.
  * @param {import('../types/schema.js').BoardElement} el
  * @param {import('../types/schema.js').AnchorBinding} binding
@@ -66,11 +127,14 @@ export function getShapePorts(el) {
  */
 export function resolveBindingPoint(el, binding) {
   const r = getNormalizedRect(el);
+  const center = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  const rot = el.rotation || 0;
   if (typeof binding.rx === 'number' && typeof binding.ry === 'number') {
-    return {
+    const localPt = {
       x: r.x + binding.rx * r.width,
       y: r.y + binding.ry * r.height,
     };
+    return rot ? rotatePoint(localPt, center, rot) : localPt;
   }
   return getShapePorts(el)[binding.side];
 }
@@ -148,7 +212,7 @@ function softCenterSnap(norm, span, snapPx) {
 /**
  * Project a world point onto any flexible attachment position on an element's perimeter
  * (or exact interior position when allowInterior is enabled).
- * @param {{ x: number, y: number }} point
+ * @param {{ x: number, y: number }} worldPoint
  * @param {import('../types/schema.js').BoardElement} el
  * @param {{ threshold: number, allowInterior?: boolean, centerSnapPx?: number }} opts
  * @returns {{
@@ -160,11 +224,27 @@ function softCenterSnap(norm, span, snapPx) {
  *   distance: number
  * } | null}
  */
-export function projectPointToElementAnchor(point, el, opts) {
+export function projectPointToElementAnchor(worldPoint, el, opts) {
   const r = getNormalizedRect(el);
   if (r.width < 1 || r.height < 1) return null;
 
   const { threshold, allowInterior = false, centerSnapPx = 6 } = opts;
+  const rot = el.rotation || 0;
+  const center = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  const point = rot ? unrotatePoint(worldPoint, center, rot) : worldPoint;
+
+  /**
+   * Transform a local anchor result back to world coordinates when rotated.
+   * @param {{ elementId: string, side: import('../types/schema.js').PortSide, rx: number, ry: number, point: { x: number, y: number }, distance: number }} res
+   */
+  const finalize = (res) =>
+    rot
+      ? {
+          ...res,
+          side: rotatePortSide(res.side, rot),
+          point: rotatePoint(res.point, center, rot),
+        }
+      : res;
 
   const insideBox =
     point.x >= r.x &&
@@ -186,14 +266,14 @@ export function projectPointToElementAnchor(point, el, opts) {
   if (allowInterior && insideBox && !CONTAINER_TYPES.has(el.type)) {
     const rx = Math.max(0, Math.min(1, (point.x - r.x) / r.width));
     const ry = Math.max(0, Math.min(1, (point.y - r.y) / r.height));
-    return {
+    return finalize({
       elementId: el.id,
       side: inferSideFromNormalized(rx, ry),
       rx,
       ry,
       point: { x: r.x + rx * r.width, y: r.y + ry * r.height },
       distance: 0,
-    };
+    });
   }
 
   // Ellipse perimeter projection
@@ -242,14 +322,14 @@ export function projectPointToElementAnchor(point, el, opts) {
           ? 'bottom'
           : 'top';
 
-    return {
+    return finalize({
       elementId: el.id,
       side,
       rx,
       ry,
       point: { x: px, y: py },
       distance: insideEllipse ? dist * 0.5 : dist,
-    };
+    });
   }
 
   // Diamond perimeter projection (4 diagonal edges)
@@ -286,14 +366,14 @@ export function projectPointToElementAnchor(point, el, opts) {
     }
     const rx = Math.max(0, Math.min(1, (px - r.x) / r.width));
     const ry = Math.max(0, Math.min(1, (py - r.y) / r.height));
-    return {
+    return finalize({
       elementId: el.id,
       side: inferSideFromNormalized(rx, ry),
       rx,
       ry,
       point: { x: px, y: py },
       distance: insideDiamond ? best.dist * 0.5 : best.dist,
-    };
+    });
   }
 
   // Rectangular / Table / DFD / UML / Arch perimeter projection (any point on all 4 sides)
@@ -336,14 +416,14 @@ export function projectPointToElementAnchor(point, el, opts) {
     rx = best.side === 'left' ? 0 : 1;
   }
 
-  return {
+  return finalize({
     elementId: el.id,
     side: best.side,
     rx,
     ry,
     point: { x: r.x + rx * r.width, y: r.y + ry * r.height },
     distance: insideBox ? best.proj.dist * 0.5 : best.proj.dist,
-  };
+  });
 }
 
 /**

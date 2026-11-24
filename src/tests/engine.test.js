@@ -2,11 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { screenToWorld, snapValue, worldToScreen, zoomAtPoint } from '../engine/camera.js';
 import {
   applyResize,
+  applyResizeRotated,
   computeAlignmentGuides,
+  getElementBounds,
+  getRotationHandle,
   hitTestElement,
+  hitTestRotationHandle,
   rectsIntersect,
 } from '../engine/geometry.js';
-import { findNearestPort, getShapePorts, resolveBindingPoint } from '../engine/ports.js';
+import {
+  findNearestPort,
+  getShapePorts,
+  normalizeRotation,
+  resolveBindingPoint,
+} from '../engine/ports.js';
+import { ElementSchema } from '../types/schema.js';
 import { computeConnectorPath } from '../engine/router.js';
 import {
   exportToSvgString,
@@ -351,5 +361,62 @@ describe('freehand auto-shape recognition', () => {
       return { x: 50 + 8 * Math.cos(a), y: 50 + 8 * Math.sin(a) };
     });
     expect(recognizeFreehandShape(tiny)).toBeNull();
+  });
+});
+
+describe('360-degree symbol rotation', () => {
+  it('rotates hit-testing, bounding box, rotation knob, connector ports, resize, and SVG export', () => {
+    // 200x40 wide horizontal bar centered at (200, 120) rotated 90° becomes 40x200 vertical bar
+    const bar = createElementFromShape('rectangle', 200, 120);
+    bar.x = 100;
+    bar.y = 100;
+    bar.width = 200;
+    bar.height = 40;
+    bar.rotation = 90;
+
+    expect(ElementSchema.safeParse(bar).success).toBe(true);
+    expect(normalizeRotation(-90)).toBe(270);
+    expect(normalizeRotation(405)).toBe(45);
+
+    const map = new Map([[bar.id, bar]]);
+    // Point at (200, 30) is inside the rotated 90° vertical bar (y spans 20..220), NOT inside unrotated 100..140
+    expect(hitTestElement({ x: 200, y: 30 }, bar, map)).toBe(true);
+    // Point at (110, 120) was inside unrotated bar, but is outside the rotated 90° vertical bar
+    expect(hitTestElement({ x: 110, y: 120 }, bar, map)).toBe(false);
+
+    // Rotated AABB swaps width & height
+    const aabb = getElementBounds(bar, map);
+    expect(Math.round(aabb.width)).toBe(40);
+    expect(Math.round(aabb.height)).toBe(200);
+
+    // Rotation knob moves to the right of the shape at 90° and hit-tests cleanly
+    const knob = getRotationHandle({ x: 100, y: 100, width: 200, height: 40 }, 1, 90);
+    expect(knob.x).toBeGreaterThan(220);
+    expect(Math.round(knob.y)).toBe(120);
+    expect(hitTestRotationHandle(knob, { x: 100, y: 100, width: 200, height: 40 }, 1, 90)).toBe(true);
+
+    // Ports & bound connector points rotate cleanly around center (200, 120)
+    const ports = getShapePorts(bar);
+    expect(Math.round(ports.right.x)).toBe(200);
+    expect(Math.round(ports.right.y)).toBe(220);
+    const bound = resolveBindingPoint(bar, { elementId: bar.id, side: 'right', rx: 1, ry: 0.5 });
+    expect(Math.round(bound.x)).toBe(200);
+    expect(Math.round(bound.y)).toBe(220);
+
+    // Resizing east handle downward by +40px on a 90°-rotated bar increases its local width to 240
+    const resized = applyResizeRotated(
+      { x: 100, y: 100, width: 200, height: 40 },
+      'e',
+      0,
+      40,
+      90,
+      24,
+    );
+    expect(Math.round(resized.width)).toBe(240);
+    expect(Math.round(resized.height)).toBe(40);
+
+    // SVG export wraps rotated element in <g transform="rotate(90 200 120)">
+    const svg = exportToSvgString([bar]);
+    expect(svg).toContain('transform="rotate(90 200 120)"');
   });
 });

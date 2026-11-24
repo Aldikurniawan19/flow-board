@@ -3,14 +3,21 @@ import { GRID_SIZE } from '../constants/tokens.js';
 import { screenToWorld, snapValue, worldToScreen, zoomAtPoint } from '../engine/camera.js';
 import { renderCanvasScene } from '../engine/canvasRenderer.js';
 import {
-  applyResize,
+  applyResizeRotated,
   computeAlignmentGuides,
   findTopmostElementAtPoint,
   getElementBounds,
+  getResizeHandles,
   hitTestResizeHandle,
+  hitTestRotationHandle,
   rectsIntersect,
 } from '../engine/geometry.js';
-import { findNearestPort, getNormalizedRect, isConnectableElement } from '../engine/ports.js';
+import {
+  findNearestPort,
+  getNormalizedRect,
+  isConnectableElement,
+  normalizeRotation,
+} from '../engine/ports.js';
 import { computeConnectorPath } from '../engine/router.js';
 import { recognizeFreehandShape } from '../engine/shapeRecognizer.js';
 import { createElementFromShape } from '../engine/shapeRegistry.js';
@@ -488,8 +495,19 @@ export function WhiteboardCanvas() {
             }
           }
         } else if (sel.type !== 'freehand') {
-          const rect = getElementBounds(sel, elementsById);
-          const handle = hitTestResizeHandle(world, rect, store.camera.zoom);
+          const rect = getNormalizedRect(sel);
+          const rot = sel.rotation || 0;
+          if (hitTestRotationHandle(world, rect, store.camera.zoom, rot)) {
+            store.commitSnapshot();
+            interactionRef.current = {
+              mode: 'rotate',
+              id: sel.id,
+              center: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
+            };
+            setCursorStyle('grabbing');
+            return;
+          }
+          const handle = hitTestResizeHandle(world, rect, store.camera.zoom, rot);
           if (handle) {
             store.commitSnapshot();
             interactionRef.current = {
@@ -498,6 +516,7 @@ export function WhiteboardCanvas() {
               handle,
               startWorld: world,
               initialRect: rect,
+              initialRotation: rot,
             };
             return;
           }
@@ -576,13 +595,31 @@ export function WhiteboardCanvas() {
       } else {
         if (hoveredPort) setHoveredPort(null);
         if (showPortsForId) setShowPortsForId(null);
-        setCursorStyle(
-          store.activeTool === 'hand' || spacePressedRef.current
-            ? 'grab'
-            : store.activeTool === 'select'
-              ? 'default'
-              : 'crosshair',
-        );
+
+        if (store.activeTool === 'hand' || spacePressedRef.current) {
+          setCursorStyle('grab');
+        } else if (store.activeTool === 'select') {
+          let nextCursor = 'default';
+          if (store.selectedIds.length === 1) {
+            const sel = store.elements.find((el) => el.id === store.selectedIds[0]);
+            if (sel && !sel.locked && sel.type !== 'connector' && sel.type !== 'freehand') {
+              const rect = getNormalizedRect(sel);
+              const rot = sel.rotation || 0;
+              if (hitTestRotationHandle(world, rect, store.camera.zoom, rot)) {
+                nextCursor = 'grab';
+              } else {
+                const h = hitTestResizeHandle(world, rect, store.camera.zoom, rot);
+                if (h) {
+                  const found = getResizeHandles(rect, 0).find((item) => item.id === h);
+                  nextCursor = found ? found.cursor : 'default';
+                }
+              }
+            }
+          }
+          setCursorStyle(nextCursor);
+        } else {
+          setCursorStyle('crosshair');
+        }
       }
       return;
     }
@@ -751,18 +788,48 @@ export function WhiteboardCanvas() {
       return;
     }
 
+    if (interaction.mode === 'rotate') {
+      const { center } = interaction;
+      const rawDeg = (Math.atan2(world.y - center.y, world.x - center.x) * 180) / Math.PI + 90;
+      let nextDeg = normalizeRotation(rawDeg);
+      if (e.shiftKey) {
+        nextDeg = normalizeRotation(Math.round(nextDeg / 15) * 15);
+      } else {
+        // Gentle magnetic snap within 3° of 0°/90°/180°/270° for clean alignment
+        const nearestCardinal = Math.round(nextDeg / 90) * 90;
+        if (Math.abs(nextDeg - nearestCardinal) <= 3) {
+          nextDeg = normalizeRotation(nearestCardinal);
+        } else {
+          nextDeg = normalizeRotation(Math.round(nextDeg));
+        }
+      }
+      store.setElementsLive((els) =>
+        els.map((el) => (el.id === interaction.id ? { ...el, rotation: nextDeg } : el)),
+      );
+      return;
+    }
+
     if (interaction.mode === 'resize') {
       const dx = world.x - interaction.startWorld.x;
       const dy = world.y - interaction.startWorld.y;
-      const resized = applyResize(interaction.initialRect, interaction.handle, dx, dy, 28);
-      const snapped = store.settings.snapToGrid
-        ? {
-            x: snapValue(resized.x, GRID_SIZE, true),
-            y: snapValue(resized.y, GRID_SIZE, true),
-            width: Math.max(28, snapValue(resized.width, GRID_SIZE, true)),
-            height: Math.max(28, snapValue(resized.height, GRID_SIZE, true)),
-          }
-        : resized;
+      const rot = interaction.initialRotation || 0;
+      const resized = applyResizeRotated(
+        interaction.initialRect,
+        interaction.handle,
+        dx,
+        dy,
+        rot,
+        28,
+      );
+      const snapped =
+        store.settings.snapToGrid && !rot
+          ? {
+              x: snapValue(resized.x, GRID_SIZE, true),
+              y: snapValue(resized.y, GRID_SIZE, true),
+              width: Math.max(28, snapValue(resized.width, GRID_SIZE, true)),
+              height: Math.max(28, snapValue(resized.height, GRID_SIZE, true)),
+            }
+          : resized;
       store.setElementsLive((els) =>
         els.map((el) => (el.id === interaction.id ? { ...el, ...snapped } : el)),
       );
@@ -845,7 +912,7 @@ export function WhiteboardCanvas() {
 
     if (!interaction) return;
 
-    if (interaction.mode === 'pan') {
+    if (interaction.mode === 'pan' || interaction.mode === 'rotate') {
       setCursorStyle(store.activeTool === 'hand' ? 'grab' : 'default');
       return;
     }
@@ -1093,6 +1160,7 @@ export function WhiteboardCanvas() {
             top: `${editorStyle.top}px`,
             width: `${editorStyle.width}px`,
             height: `${editorStyle.height}px`,
+            transform: editingEl.rotation ? `rotate(${editingEl.rotation}deg)` : undefined,
           }}
           className="absolute z-30 rounded-md border-2 border-[#1D4ED8] bg-[#FFFFFF]/95 px-2 py-1 text-center text-sm font-medium text-[#0F172A] shadow-sm focus:outline-none resize-none"
         />

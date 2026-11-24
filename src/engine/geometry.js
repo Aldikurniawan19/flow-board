@@ -1,4 +1,4 @@
-import { getNormalizedRect } from './ports.js';
+import { getNormalizedRect, rotatePoint, unrotatePoint } from './ports.js';
 import { computeConnectorPath } from './router.js';
 
 /**
@@ -54,7 +54,33 @@ export function getElementBounds(el, elementsById = new Map()) {
     };
   }
 
-  return getNormalizedRect(el);
+  const r = getNormalizedRect(el);
+  if (el.rotation) {
+    const center = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    const corners = [
+      rotatePoint({ x: r.x, y: r.y }, center, el.rotation),
+      rotatePoint({ x: r.x + r.width, y: r.y }, center, el.rotation),
+      rotatePoint({ x: r.x + r.width, y: r.y + r.height }, center, el.rotation),
+      rotatePoint({ x: r.x, y: r.y + r.height }, center, el.rotation),
+    ];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const c of corners) {
+      if (c.x < minX) minX = c.x;
+      if (c.y < minY) minY = c.y;
+      if (c.x > maxX) maxX = c.x;
+      if (c.y > maxY) maxY = c.y;
+    }
+    return {
+      x: minX,
+      y: minY,
+      width: Math.max(4, maxX - minX),
+      height: Math.max(4, maxY - minY),
+    };
+  }
+  return r;
 }
 
 /**
@@ -110,19 +136,22 @@ export function hitTestElement(point, el, elementsById, tolerance = 8) {
   }
 
   const r = getNormalizedRect(el);
+  const center = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  const localPt = el.rotation ? unrotatePoint(point, center, el.rotation) : point;
+
   if (el.type === 'frame' || el.type === 'uml_boundary' || el.type === 'uml_fragment') {
-    const nearLeft = Math.abs(point.x - r.x) <= tolerance && point.y >= r.y - tolerance && point.y <= r.y + r.height + tolerance;
-    const nearRight = Math.abs(point.x - (r.x + r.width)) <= tolerance && point.y >= r.y - tolerance && point.y <= r.y + r.height + tolerance;
-    const nearTop = Math.abs(point.y - r.y) <= 28 && point.x >= r.x - tolerance && point.x <= r.x + r.width + tolerance;
-    const nearBottom = Math.abs(point.y - (r.y + r.height)) <= tolerance && point.x >= r.x - tolerance && point.x <= r.x + r.width + tolerance;
+    const nearLeft = Math.abs(localPt.x - r.x) <= tolerance && localPt.y >= r.y - tolerance && localPt.y <= r.y + r.height + tolerance;
+    const nearRight = Math.abs(localPt.x - (r.x + r.width)) <= tolerance && localPt.y >= r.y - tolerance && localPt.y <= r.y + r.height + tolerance;
+    const nearTop = Math.abs(localPt.y - r.y) <= 28 && localPt.x >= r.x - tolerance && localPt.x <= r.x + r.width + tolerance;
+    const nearBottom = Math.abs(localPt.y - (r.y + r.height)) <= tolerance && localPt.x >= r.x - tolerance && localPt.x <= r.x + r.width + tolerance;
     return nearLeft || nearRight || nearTop || nearBottom;
   }
 
   return (
-    point.x >= r.x - 2 &&
-    point.x <= r.x + r.width + 2 &&
-    point.y >= r.y - 2 &&
-    point.y <= r.y + r.height + 2
+    localPt.x >= r.x - 2 &&
+    localPt.x <= r.x + r.width + 2 &&
+    localPt.y >= r.y - 2 &&
+    localPt.y <= r.y + r.height + 2
   );
 }
 
@@ -159,14 +188,17 @@ export function rectsIntersect(a, b) {
 }
 
 /**
- * Compute world positions of the 8 resize handles for a bounding rect.
+ * Compute world positions of the 8 resize handles for a bounding rect (rotation-aware).
  * @param {Rect} rect
+ * @param {number} [rotation]
  * @returns {Array<{ id: ResizeHandle, x: number, y: number, cursor: string }>}
  */
-export function getResizeHandles(rect) {
+export function getResizeHandles(rect, rotation = 0) {
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
-  return [
+  const center = { x: cx, y: cy };
+  /** @type {Array<{ id: ResizeHandle, x: number, y: number, cursor: string }>} */
+  const raw = [
     { id: 'nw', x: rect.x, y: rect.y, cursor: 'nwse-resize' },
     { id: 'n', x: cx, y: rect.y, cursor: 'ns-resize' },
     { id: 'ne', x: rect.x + rect.width, y: rect.y, cursor: 'nesw-resize' },
@@ -176,19 +208,61 @@ export function getResizeHandles(rect) {
     { id: 'sw', x: rect.x, y: rect.y + rect.height, cursor: 'nesw-resize' },
     { id: 'w', x: rect.x, y: cy, cursor: 'ew-resize' },
   ];
+  if (!rotation) return raw;
+  return raw.map((h) => {
+    const p = rotatePoint(h, center, rotation);
+    return { ...h, x: p.x, y: p.y };
+  });
 }
 
 /**
- * Hit test resize handles for a selected element bounds.
+ * Compute world position of the top rotation knob for a selected shape.
+ * @param {Rect} rect
+ * @param {number} zoom
+ * @param {number} [rotation]
+ * @returns {{ x: number, y: number, stemStart: { x: number, y: number } }}
+ */
+export function getRotationHandle(rect, zoom, rotation = 0) {
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+  const center = { x: cx, y: cy };
+  const pad = 4 / zoom;
+  const stemDist = 28 / zoom;
+  const localStem = { x: cx, y: rect.y - pad };
+  const localKnob = { x: cx, y: rect.y - stemDist };
+  const knob = rotation ? rotatePoint(localKnob, center, rotation) : localKnob;
+  const stemStart = rotation ? rotatePoint(localStem, center, rotation) : localStem;
+  return { x: knob.x, y: knob.y, stemStart };
+}
+
+/**
+ * Hit test the rotation knob above a selected shape.
  * @param {{ x: number, y: number }} worldPoint
  * @param {Rect} rect
  * @param {number} zoom
+ * @param {number} [rotation]
+ * @returns {boolean}
+ */
+export function hitTestRotationHandle(worldPoint, rect, zoom, rotation = 0) {
+  const knob = getRotationHandle(rect, zoom, rotation);
+  const radius = 12 / zoom;
+  return Math.hypot(worldPoint.x - knob.x, worldPoint.y - knob.y) <= radius;
+}
+
+/**
+ * Hit test resize handles for a selected element bounds (rotation-aware).
+ * @param {{ x: number, y: number }} worldPoint
+ * @param {Rect} rect
+ * @param {number} zoom
+ * @param {number} [rotation]
  * @returns {ResizeHandle | null}
  */
-export function hitTestResizeHandle(worldPoint, rect, zoom) {
+export function hitTestResizeHandle(worldPoint, rect, zoom, rotation = 0) {
   const radius = 8 / zoom;
-  for (const h of getResizeHandles(rect)) {
-    if (Math.abs(worldPoint.x - h.x) <= radius && Math.abs(worldPoint.y - h.y) <= radius) {
+  const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  const localPt = rotation ? unrotatePoint(worldPoint, center, rotation) : worldPoint;
+  for (const h of getResizeHandles(rect, 0)) {
+    if (Math.abs(localPt.x - h.x) <= radius && Math.abs(localPt.y - h.y) <= radius) {
       return h.id;
     }
   }
@@ -225,6 +299,51 @@ export function applyResize(initial, handle, dx, dy, minSize = 24) {
   }
 
   return { x, y, width, height };
+}
+
+/**
+ * Apply a resize handle delta to a rotated element in its local coordinate frame
+ * while keeping the opposite edge/corner pinned in world space.
+ * @param {Rect} initial
+ * @param {ResizeHandle} handle
+ * @param {number} worldDx
+ * @param {number} worldDy
+ * @param {number} [rotation]
+ * @param {number} [minSize]
+ * @returns {Rect}
+ */
+export function applyResizeRotated(initial, handle, worldDx, worldDy, rotation = 0, minSize = 24) {
+  if (!rotation) {
+    return applyResize(initial, handle, worldDx, worldDy, minSize);
+  }
+  const rad = (-rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const localDx = worldDx * cos - worldDy * sin;
+  const localDy = worldDx * sin + worldDy * cos;
+
+  const localResized = applyResize(initial, handle, localDx, localDy, minSize);
+  const initCx = initial.x + initial.width / 2;
+  const initCy = initial.y + initial.height / 2;
+  const nextLocalCx = localResized.x + localResized.width / 2;
+  const nextLocalCy = localResized.y + localResized.height / 2;
+
+  const shiftLocalX = nextLocalCx - initCx;
+  const shiftLocalY = nextLocalCy - initCy;
+
+  // Rotate center shift back to world space so the opposite edge stays fixed
+  const fwdRad = (rotation * Math.PI) / 180;
+  const fCos = Math.cos(fwdRad);
+  const fSin = Math.sin(fwdRad);
+  const nextWorldCx = initCx + shiftLocalX * fCos - shiftLocalY * fSin;
+  const nextWorldCy = initCy + shiftLocalX * fSin + shiftLocalY * fCos;
+
+  return {
+    x: nextWorldCx - localResized.width / 2,
+    y: nextWorldCy - localResized.height / 2,
+    width: localResized.width,
+    height: localResized.height,
+  };
 }
 
 /**

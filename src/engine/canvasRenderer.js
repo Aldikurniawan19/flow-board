@@ -1,9 +1,9 @@
 import rough from 'roughjs';
 import getStroke from 'perfect-freehand';
 import { FONT_FAMILY_MAP, GRID_SIZE, UI_TOKENS } from '../constants/tokens.js';
-import { getElementBounds, getResizeHandles } from './geometry.js';
+import { getElementBounds, getResizeHandles, getRotationHandle } from './geometry.js';
 import { drawCanvasMarker } from './markers.js';
-import { getShapePorts, isConnectableElement } from './ports.js';
+import { getNormalizedRect, getShapePorts, isConnectableElement } from './ports.js';
 import { computeConnectorPath } from './router.js';
 import { applyStrokeDash, drawShapeElement, wrapTextLines } from './shapeRegistry.js';
 
@@ -342,18 +342,105 @@ export function renderCanvasScene(canvas, state) {
         ctx.fill();
         ctx.stroke();
       });
-    } else {
+    } else if (el.type === 'freehand') {
       const b = getElementBounds(el, elementsById);
       const pad = 4 / state.camera.zoom;
       ctx.strokeRect(b.x - pad, b.y - pad, b.width + pad * 2, b.height + pad * 2);
+    } else {
+      const r = getNormalizedRect(el);
+      const cx = r.x + r.width / 2;
+      const cy = r.y + r.height / 2;
+      const rot = el.rotation || 0;
+      const pad = 4 / state.camera.zoom;
 
-      if (state.selectedIds.length === 1 && el.type !== 'freehand' && !el.locked) {
+      ctx.save();
+      if (rot) {
+        ctx.translate(cx, cy);
+        ctx.rotate((rot * Math.PI) / 180);
+        ctx.translate(-cx, -cy);
+      }
+      ctx.strokeRect(r.x - pad, r.y - pad, r.width + pad * 2, r.height + pad * 2);
+
+      if (state.selectedIds.length === 1 && !el.locked) {
         const hs = 8 / state.camera.zoom;
-        for (const h of getResizeHandles(b)) {
+        for (const h of getResizeHandles(r, 0)) {
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
           ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
         }
+
+        // Top rotation stem & circular handle with curved counter-clockwise arrow icon
+        const knobLocal = getRotationHandle(r, state.camera.zoom, 0);
+        const kr = 9 / state.camera.zoom;
+        const kx = knobLocal.x;
+        const ky = knobLocal.y;
+
+        ctx.beginPath();
+        ctx.moveTo(knobLocal.stemStart.x, knobLocal.stemStart.y);
+        ctx.lineTo(kx, ky + kr);
+        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.lineWidth = 1.5 / state.camera.zoom;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(kx, ky, kr, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fill();
+        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.lineWidth = 1.5 / state.camera.zoom;
+        ctx.stroke();
+
+        // Crisp circular arrow icon (open ~285° arc + top-left arrowhead, matching RotateCcw)
+        const iconR = 4.6 / state.camera.zoom;
+        const startAng = -Math.PI * 0.72; // top-left arrowhead tip
+        const endAng = Math.PI * 0.92; // wraps clockwise around top -> right -> bottom -> left
+        ctx.beginPath();
+        ctx.arc(kx, ky, iconR, startAng, endAng, false);
+        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.lineWidth = 1.5 / state.camera.zoom;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+
+        // Arrowhead at top-left pointing counter-clockwise
+        const tipX = kx + iconR * Math.cos(startAng);
+        const tipY = ky + iconR * Math.sin(startAng);
+        const headLen = 2.8 / state.camera.zoom;
+        ctx.beginPath();
+        ctx.moveTo(tipX - headLen * 0.15, tipY - headLen * 0.95);
+        ctx.lineTo(tipX, tipY);
+        ctx.lineTo(tipX + headLen * 1.0, tipY + headLen * 0.12);
+        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.lineWidth = 1.5 / state.camera.zoom;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Upright live angle pill when single rotated element is selected
+      if (state.selectedIds.length === 1 && !el.locked && rot) {
+        const knobWorld = getRotationHandle(r, state.camera.zoom, rot);
+        const label = `${Math.round(rot)}°`;
+        const fontSize = 11 / state.camera.zoom;
+        ctx.save();
+        ctx.font = `600 ${fontSize}px ${FONT_FAMILY_MAP.mono}`;
+        const tw = ctx.measureText(label).width;
+        const px = 6 / state.camera.zoom;
+        const py = 3 / state.camera.zoom;
+        const bw = tw + px * 2;
+        const bh = fontSize + py * 2;
+        const bx = knobWorld.x + 12 / state.camera.zoom;
+        const by = knobWorld.y - bh / 2;
+        ctx.fillStyle = '#0F172A';
+        ctx.beginPath();
+        ctx.roundRect?.(bx, by, bw, bh, 4 / state.camera.zoom);
+        if (!ctx.roundRect) ctx.rect(bx, by, bw, bh);
+        ctx.fill();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, bx + bw / 2, by + bh / 2);
+        ctx.restore();
       }
     }
     ctx.restore();
@@ -363,18 +450,27 @@ export function renderCanvasScene(canvas, state) {
   if (state.showPortsForId) {
     const target = elementsById.get(state.showPortsForId);
     if (target && isConnectableElement(target)) {
-      const b = getElementBounds(target, elementsById);
+      const b = getNormalizedRect(target);
       const ports = getShapePorts(target);
       const r = 4 / state.camera.zoom;
       ctx.save();
 
       // Subtle dashed perimeter highlight indicating any point along the edge is connectable
+      ctx.save();
+      if (target.rotation) {
+        const tcx = b.x + b.width / 2;
+        const tcy = b.y + b.height / 2;
+        ctx.translate(tcx, tcy);
+        ctx.rotate((target.rotation * Math.PI) / 180);
+        ctx.translate(-tcx, -tcy);
+      }
       ctx.strokeStyle = UI_TOKENS.brandPrimary;
       ctx.globalAlpha = 0.45;
       ctx.lineWidth = 1.5 / state.camera.zoom;
       ctx.setLineDash([4 / state.camera.zoom, 4 / state.camera.zoom]);
       ctx.strokeRect(b.x, b.y, b.width, b.height);
       ctx.setLineDash([]);
+      ctx.restore();
 
       // Subtle cardinal midpoint reference dots
       ctx.globalAlpha = 0.65;

@@ -37,6 +37,7 @@ import { z } from 'zod';
  * @property {number} y
  * @property {number} width
  * @property {number} height
+ * @property {number} [rotation]
  * @property {string} strokeColor
  * @property {string} fillColor
  * @property {number} strokeWidth
@@ -182,6 +183,7 @@ export const ElementSchema = z.object({
   y: z.number().finite().min(-100000).max(100000),
   width: z.number().finite().min(-100000).max(100000),
   height: z.number().finite().min(-100000).max(100000),
+  rotation: z.number().finite().min(-360).max(360).optional(),
   strokeColor: z.string().min(1).max(32),
   fillColor: z.string().min(1).max(32),
   strokeWidth: z.number().finite().min(1).max(24),

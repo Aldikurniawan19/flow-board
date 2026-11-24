@@ -1207,6 +1207,11 @@ export function drawShapeElement(ctx, rc, el) {
 
   ctx.save();
   ctx.globalAlpha = el.opacity;
+  if (el.rotation) {
+    ctx.translate(cx, cy);
+    ctx.rotate((el.rotation * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+  }
 
   switch (el.type) {
     case 'text':

@@ -166,12 +166,16 @@ export function exportToSvgString(elements, options = {}) {
     const fontSize = el.fontSize || 14;
     const cx = r.x + r.width / 2;
     const cy = r.y + r.height / 2;
+    const rot = el.rotation || 0;
+    if (rot) {
+      parts.push(`<g transform="rotate(${rot} ${cx} ${cy})">`);
+    }
 
     if (
       el.type === 'ellipse' ||
       el.type === 'uml_usecase' ||
       el.type === 'dfd_yd_process' ||
-      el.type.startsWith('erd_chen_') && el.type.includes('attr')
+      (el.type.startsWith('erd_chen_') && el.type.includes('attr'))
     ) {
       parts.push(
         `<ellipse cx="${cx}" cy="${cy}" rx="${r.width / 2}" ry="${r.height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}"${dash} />`,
@@ -204,6 +208,7 @@ export function exportToSvgString(elements, options = {}) {
           `<text x="${r.x + 10}" y="${y}" font-family="${fontFamily}" font-size="12" fill="#0F172A">${escapeXml(label)}</text>`,
         );
       });
+      if (rot) parts.push('</g>');
       continue;
     } else if (el.type !== 'text') {
       const rx = el.type === 'fc_terminator' ? r.height / 2 : el.type === 'rounded_rect' || el.type === 'dfd_gs_process' ? 10 : 2;
@@ -217,6 +222,7 @@ export function exportToSvgString(elements, options = {}) {
         `<text x="${cx}" y="${cy + fontSize * 0.35}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSize}" fill="#0F172A">${escapeXml(el.text)}</text>`,
       );
     }
+    if (rot) parts.push('</g>');
   }
 
   /** @type {string[]} */
