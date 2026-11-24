@@ -58,6 +58,7 @@ import { z } from 'zod';
  * @property {AnchorBinding | null} [startBinding]
  * @property {AnchorBinding | null} [endBinding]
  * @property {Point[]} [waypoints]
+ * @property {Point | null} [labelPos]
  * @property {ErdField[]} [fields]
  * @property {string[]} [attributes]
  * @property {string[]} [methods]
@@ -202,6 +203,7 @@ export const ElementSchema = z.object({
   startBinding: AnchorBindingSchema.nullable().optional(),
   endBinding: AnchorBindingSchema.nullable().optional(),
   waypoints: z.array(PointSchema).max(64).optional(),
+  labelPos: PointSchema.nullable().optional(),
   fields: z.array(ErdFieldSchema).max(100).optional(),
   attributes: z.array(z.string().max(200)).max(100).optional(),
   methods: z.array(z.string().max(200)).max(100).optional(),

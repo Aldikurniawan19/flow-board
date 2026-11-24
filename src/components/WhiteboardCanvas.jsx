@@ -698,6 +698,7 @@ export function WhiteboardCanvas() {
               width: endX - targetPt.x,
               height: endY - targetPt.y,
               startBinding: nextBinding,
+              labelPos: null,
             };
           }
           return {
@@ -705,6 +706,7 @@ export function WhiteboardCanvas() {
             width: targetPt.x - el.x,
             height: targetPt.y - el.y,
             endBinding: nextBinding,
+            labelPos: null,
           };
         }),
       );
@@ -743,7 +745,7 @@ export function WhiteboardCanvas() {
           const nextWaypoints = el.waypoints.map((pt, idx) =>
             idx === interaction.waypointIndex ? { x: nx, y: ny } : pt,
           );
-          return { ...el, waypoints: nextWaypoints };
+          return { ...el, waypoints: nextWaypoints, labelPos: null };
         }),
       );
       return;

@@ -78,16 +78,12 @@ export function App() {
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#F8FAFC]">
       <HeaderBar
-        leftOpen={leftOpen}
-        rightOpen={rightOpen}
-        onToggleLeft={() => setLeftOpen((v) => !v)}
-        onToggleRight={() => setRightOpen((v) => !v)}
         onOpenExport={() => setExportOpen(true)}
         onOpenPlantText={() => setPlantTextOpen(true)}
       />
 
       <div className="flex-1 min-h-0 flex relative overflow-hidden">
-        <ShapeLibrarySidebar open={leftOpen} onClose={() => setLeftOpen(false)} />
+        <ShapeLibrarySidebar open={leftOpen} onToggle={() => setLeftOpen((v) => !v)} />
 
         <main className="flex-1 min-w-0 relative flex flex-col overflow-hidden">
           {boardLoadState === 'loading' ? (
@@ -126,7 +122,7 @@ export function App() {
           )}
         </main>
 
-        <InspectorPanel open={rightOpen} onClose={() => setRightOpen(false)} />
+        <InspectorPanel open={rightOpen} onToggle={() => setRightOpen((v) => !v)} />
       </div>
 
       <ExportImportModal open={exportOpen} onClose={() => setExportOpen(false)} />

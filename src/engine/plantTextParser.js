@@ -1,3 +1,4 @@
+import { layoutDiagramElements } from './autoLayout.js';
 import { getShapePorts } from './ports.js';
 
 /**
@@ -184,20 +185,33 @@ function nextSeed() {
 }
 
 /**
- * Strip PlantUML comments and boilerplate directives, returning meaningful trimmed lines.
+ * Strip PlantUML comments, multiline title/skinparam blocks, and boilerplate directives.
  * @param {string} raw
  * @returns {string[]}
  */
 function preprocessLines(raw) {
-  const withoutBlockComments = raw.replace(/\/'[\s\S]*?'\//g, '');
-  return withoutBlockComments
+  let cleaned = raw
+    // Remove block comments /' ... '/
+    .replace(/\/'[\s\S]*?'\//g, '')
+    // Remove multiline title ... end title blocks
+    .replace(/^\s*title\s*$[\s\S]*?^\s*end\s+title\s*$/gim, '')
+    // Remove multiline skinparam ... { ... } blocks
+    .replace(/^\s*skinparam\b[^{}\n]*\{[\s\S]*?\}/gim, '')
+    // Remove multiline style / legend blocks
+    .replace(/^\s*(?:legend|header|footer)\b[\s\S]*?^\s*end\s+(?:legend|header|footer)\s*$/gim, '');
+
+  return cleaned
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => {
       if (!l) return false;
       if (l.startsWith("'") || l.startsWith('//')) return false;
       if (/^@(startuml|enduml|startmindmap|endmindmap)/i.test(l)) return false;
-      if (/^(skinparam|hide|show|left to right|top to bottom|autonumber|title\s|scale\s|!theme|!include)/i.test(l)) {
+      if (
+        /^(skinparam|hide|show|left to right|top to bottom|autonumber|title\s|scale\s|!theme|!include)/i.test(
+          l,
+        )
+      ) {
         return false;
       }
       return true;
@@ -205,11 +219,48 @@ function preprocessLines(raw) {
 }
 
 /**
- * Detect PlantUML diagram kind from preprocessed lines.
+ * Strip PlantUML Creole markup (`**bold**`, `<color:...></color>`, decorative bar lines).
+ * @param {string} raw
+ * @returns {string}
+ */
+function cleanPlantLabel(raw) {
+  return raw
+    .replace(/\\n/g, '\n')
+    .replace(/<color:[^>]+>([\s\S]*?)<\/color>/gi, '$1')
+    .replace(/<\/?(?:b|i|u|s|size(?::\d+)?|font[^>]*)>/gi, '')
+    .replace(/\*\*/g, '')
+    .replace(/__/g, '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !/^[━─═\-_=~•·]{3,}$/.test(l))
+    .join('\n')
+    .trim();
+}
+
+/**
+ * Map PlantUML arrow color token (`#1565C0`, `#2E7D32`, etc.) to DESIGN.md canvas stroke tokens.
+ * @param {string} rawArrowLine
+ * @returns {string}
+ */
+function extractArrowColor(rawArrowLine) {
+  const m = rawArrowLine.match(/\[(#[0-9a-fA-F]{3,6}|blue|green|red|orange|amber|gray|slate)\]/i);
+  if (!m) return '#0F172A';
+  const tok = m[1].toLowerCase();
+  if (tok === 'blue' || tok === '#1565c0' || tok === '#1d4ed8' || tok === '#0d47a1') return '#1D4ED8';
+  if (tok === 'green' || tok === '#2e7d32' || tok === '#15803d' || tok === '#1b5e20') return '#15803D';
+  if (tok === 'orange' || tok === 'amber' || tok === '#e65100' || tok === '#b45309') return '#B45309';
+  if (tok === 'red' || tok === '#b91c1c' || tok === '#c62828') return '#B91C1C';
+  if (tok === 'gray' || tok === 'slate') return '#475569';
+  return '#0F172A';
+}
+
+/**
+ * Detect PlantUML diagram kind from preprocessed lines and raw source hints.
  * @param {string[]} lines
+ * @param {string} [rawSource]
  * @returns {Exclude<PlantDiagramKind, 'auto'>}
  */
-export function detectPlantDiagramKind(lines) {
+export function detectPlantDiagramKind(lines, rawSource = '') {
   const joined = lines.join('\n');
 
   if (
@@ -225,6 +276,14 @@ export function detectPlantDiagramKind(lines) {
     /(\|\||\|o|o\||\}\||\|\{|\}o|o\{)[-.]{1,4}(\|\||\|o|o\||\}\||\|\{|\}o|o\{)/m.test(joined)
   ) {
     return 'erd';
+  }
+
+  // Detect DFD before Use Case when DFD stereotypes, title, or notation markers are present
+  if (
+    /<<\s*(?:DataStore|External|Process)\s*>>/i.test(joined) ||
+    /\bDFD\b|Data\s+Flow\s+Diagram|Yourdon|DeMarco|Gane\s*[&-]\s*Sarson/i.test(rawSource)
+  ) {
+    return 'dfd';
   }
 
   if (
@@ -293,6 +352,7 @@ function pickSides(src, dst) {
  * @param {{
  *   label?: string,
  *   routing?: import('../types/schema.js').RoutingMode,
+ *   strokeColor?: string,
  *   strokeStyle?: import('../types/schema.js').StrokeStyle,
  *   startMarker?: import('../types/schema.js').MarkerType,
  *   endMarker?: import('../types/schema.js').MarkerType,
@@ -316,7 +376,7 @@ function makeBoundConnector(src, dst, opts = {}) {
     y: sp.y,
     width: ep.x - sp.x,
     height: ep.y - sp.y,
-    strokeColor: '#0F172A',
+    strokeColor: opts.strokeColor || '#0F172A',
     fillColor: 'transparent',
     strokeWidth: 2,
     strokeStyle: opts.strokeStyle || 'solid',
@@ -978,10 +1038,12 @@ function parseSequence(lines, roughness) {
     activations.push({ alias, startRow, endRow: Math.max(startRow, row - 1) });
   }
 
-  const colSpacing = 220;
-  const rowSpacing = 58;
+  // Scale column spacing dynamically to the longest message label so sequence text never overlaps
+  const longestLabel = messages.reduce((max, m) => Math.max(max, (m.label || '').length), 0);
+  const colSpacing = Math.max(220, Math.min(340, Math.round(longestLabel * 7.5 + 80)));
+  const rowSpacing = 62;
   const firstMsgY = 148;
-  const totalHeight = Math.max(240, firstMsgY + Math.max(1, row) * rowSpacing + 30);
+  const totalHeight = Math.max(240, firstMsgY + Math.max(1, row) * rowSpacing + 36);
 
   /** @type {import('../types/schema.js').BoardElement[]} */
   const elements = [];
@@ -1274,82 +1336,159 @@ function parseFlowchart(lines, roughness) {
 }
 
 /**
- * Parse PlantUML syntax mapped to DFD (Gane & Sarson) symbols.
+ * Parse PlantUML syntax mapped to DFD symbols (Gane & Sarson or Yourdon & DeMarco).
+ * Supports colors, stereotypes, Creole formatting (`**bold**`, `<color>`), `[hidden]` layout hints,
+ * reversed `keyword alias as "Label"`, `\n` newlines, and directional arrows (`-down->`, `-right->`).
  * @param {string[]} lines
  * @param {number} roughness
+ * @param {{ notation?: 'gane_sarson' | 'yourdon' }} [options]
  */
-function parseDfd(lines, roughness) {
-  /** @type {Map<string, { id: string, type: 'dfd_gs_entity' | 'dfd_gs_process' | 'dfd_gs_datastore', code: string, text: string }>} */
+function parseDfd(lines, roughness, options = {}) {
+  const useYourdon = options.notation === 'yourdon';
+  const entityType = useYourdon ? 'dfd_yd_entity' : 'dfd_gs_entity';
+  const processType = useYourdon ? 'dfd_yd_process' : 'dfd_gs_process';
+  const storeType = useYourdon ? 'dfd_yd_datastore' : 'dfd_gs_datastore';
+
+  /** @type {Map<string, { id: string, role: 'entity' | 'process' | 'datastore', code: string, text: string }>} */
   const nodesMap = new Map();
-  /** @type {Array<{ from: string, to: string, label: string, dashed: boolean }>} */
+  /** @type {Array<{ from: string, to: string, label: string, dashed: boolean, color: string }>} */
   const flows = [];
 
   let procCounter = 1;
   let storeCounter = 1;
 
   /**
-   * Split leading numeric/ID code from label (e.g. "1.0 Proses Order" -> code "1.0", text "Proses Order").
+   * Split leading numeric/ID code from cleaned label (e.g. "1.0\nManajemen Master" or "D2  Data Tarif").
    * @param {string} rawLabel
    * @param {string} fallbackCode
    */
   function splitCode(rawLabel, fallbackCode) {
-    const m = rawLabel.match(/^([A-Za-z]?\d+(?:\.\d+)?)\s*[-:]?\s+(.+)$/);
-    if (m) return { code: m[1], text: m[2].trim() };
-    return { code: fallbackCode, text: rawLabel };
+    const normalized = cleanPlantLabel(rawLabel);
+    const m = normalized.match(/^([A-Za-z]?\d+(?:\.\d+)?)\s*[-:\n]\s*([\s\S]+)$/);
+    if (m) return { code: m[1].trim(), text: m[2].replace(/\n+/g, ' ').trim() };
+    const mSpace = normalized.match(/^([A-Za-z]?\d+(?:\.\d+)?)\s+([\s\S]+)$/);
+    if (mSpace) return { code: mSpace[1].trim(), text: mSpace[2].replace(/\n+/g, ' ').trim() };
+    return { code: fallbackCode, text: normalized.replace(/\n+/g, ' ').trim() };
   }
 
-  for (const line of lines) {
+  /**
+   * Infer DFD role from explicit stereotype, PlantUML keyword, or standard E/P/D naming.
+   * @param {string} alias
+   * @param {string} rawLabel
+   * @param {string} kw
+   * @param {string} stereo
+   * @returns {'entity' | 'process' | 'datastore'}
+   */
+  function inferDfdRole(alias, rawLabel, kw, stereo) {
+    const st = stereo.toLowerCase();
+    if (st.includes('store') || st.includes('data') || st.includes('db')) return 'datastore';
+    if (st.includes('entity') || st.includes('external') || st.includes('aktor')) return 'entity';
+    if (st.includes('process') || st.includes('proses')) return 'process';
+
+    if (['database', 'storage', 'collections', 'file', 'folder', 'queue', 'stack'].includes(kw)) {
+      return 'datastore';
+    }
+    if (['usecase', 'component', 'circle', 'card', 'control'].includes(kw)) {
+      return 'process';
+    }
+    if (['rectangle', 'actor', 'agent', 'person', 'boundary', 'node'].includes(kw)) {
+      if (/^(D|DS)\d+\b/i.test(alias) || /^(D|DS)\d+\b/i.test(cleanPlantLabel(rawLabel))) return 'datastore';
+      if (/^P\d+\b/i.test(alias) || /^\d+\.\d+\b/.test(cleanPlantLabel(rawLabel))) return 'process';
+      return 'entity';
+    }
+
+    if (/^(D|DS|DB)\d+/i.test(alias)) return 'datastore';
+    if (/^(E|EXT)\d+/i.test(alias)) return 'entity';
+    if (/^P\d+/i.test(alias)) return 'process';
+    return 'process';
+  }
+
+  /**
+   * Register a DFD node entry.
+   * @param {string} alias
+   * @param {string} rawLabel
+   * @param {string} kw
+   * @param {string} stereo
+   */
+  function registerNode(alias, rawLabel, kw, stereo) {
+    const role = inferDfdRole(alias, rawLabel, kw, stereo);
+    const cleaned = cleanPlantLabel(rawLabel);
+    if (role === 'datastore') {
+      const defaultCode = /^(D|DS)\d+$/i.test(alias) ? alias.toUpperCase() : `D${storeCounter++}`;
+      const { code, text } = splitCode(cleaned, defaultCode);
+      nodesMap.set(alias, { id: crypto.randomUUID(), role, code, text });
+    } else if (role === 'process') {
+      const defaultCode = /^P\d+$/i.test(alias) ? `${alias.slice(1)}.0` : `${procCounter++}.0`;
+      const { code, text } = splitCode(cleaned, defaultCode);
+      nodesMap.set(alias, { id: crypto.randomUUID(), role, code, text });
+    } else {
+      nodesMap.set(alias, {
+        id: crypto.randomUUID(),
+        role,
+        code: '',
+        text: cleaned.replace(/\n+/g, '\n'),
+      });
+    }
+  }
+
+  for (const rawLine of lines) {
+    // Ignore layout-only hidden connectors (`E6 -[hidden]down-> E1`)
+    if (/\[hidden\]/i.test(rawLine)) continue;
+
+    // Strip trailing color tokens like #LightBlue or #E2E8F0;border:black
+    const line = rawLine.replace(/\s+#[A-Za-z0-9_;:-]+$/, '').trim();
+    if (!line || line === '}' || /^(?:package|together|frame)\b.*\{$/i.test(line)) continue;
+
+    // Declaration: `keyword "Label" as alias <<stereo>>` OR `keyword alias as "Label"`
     const decl = line.match(
-      /^(rectangle|actor|agent|usecase|component|circle|card|database|storage|collections|file)\s+(?:"([^"]+)"|\(([^)]+)\)|\[([^\]]+)\]|([A-Za-z0-9_.-]+))(?:\s+as\s+([A-Za-z0-9_]+))?$/i,
+      /^(rectangle|actor|agent|person|boundary|node|usecase|component|circle|card|control|database|storage|collections|file|folder|queue|stack)\s+(?:"([^"]+)"|\(([^)]+)\)|\[([^\]]+)\]|([A-Za-z0-9_.-]+))(?:\s+as\s+(?:"([^"]+)"|([A-Za-z0-9_]+)))?(?:\s*<<([^>]+)>>)?$/i,
     );
     if (decl) {
       const kw = decl[1].toLowerCase();
-      const rawLabel = (decl[2] || decl[3] || decl[4] || decl[5]).trim();
-      const alias = decl[6] || rawLabel;
+      const firstVal = (decl[2] || decl[3] || decl[4] || decl[5]).trim();
+      const secondQuoted = decl[6];
+      const secondIdent = decl[7];
+      const stereo = decl[8] || '';
 
-      if (kw === 'database' || kw === 'storage' || kw === 'collections' || kw === 'file') {
-        const { code, text } = splitCode(rawLabel, `D${storeCounter++}`);
-        nodesMap.set(alias, { id: crypto.randomUUID(), type: 'dfd_gs_datastore', code, text });
-      } else if (kw === 'usecase' || kw === 'component' || kw === 'circle' || kw === 'card') {
-        const { code, text } = splitCode(rawLabel, `${procCounter++}.0`);
-        nodesMap.set(alias, { id: crypto.randomUUID(), type: 'dfd_gs_process', code, text });
+      if (secondQuoted) {
+        registerNode(firstVal, secondQuoted, kw, stereo);
       } else {
-        nodesMap.set(alias, { id: crypto.randomUUID(), type: 'dfd_gs_entity', code: '', text: rawLabel });
+        const alias = secondIdent || firstVal;
+        registerNode(alias, firstVal, kw, stereo);
       }
       continue;
     }
 
-    const flowMatch = line.match(
-      /^(?:"([^"]+)"|([A-Za-z0-9_]+))\s*([-.]{1,4}>|<[-.]{1,4})\s*(?:"([^"]+)"|([A-Za-z0-9_]+))(?:\s*:\s*(.+))?$/,
+    const color = extractArrowColor(line);
+
+    // Normalize PlantUML colored & directional arrows (`-[#1565C0]->`, `<-down-`, `-[#2E7D32]down->`, etc.)
+    const normalizedFlow = line
+      .replace(/-\[[^\]]+\](?:up|down|left|right|u|d|l|r)?-/gi, '--')
+      .replace(/-(?:up|down|left|right|u|d|l|r)-/gi, '--')
+      .replace(/\.(?:up|down|left|right|u|d|l|r)\./gi, '..');
+
+    const flowMatch = normalizedFlow.match(
+      /^(?:"([^"]+)"|([A-Za-z0-9_]+))\s*([-.]{1,4}>|<[-.]{1,4}|<[-.]{1,4}>)\s*(?:"([^"]+)"|([A-Za-z0-9_]+))(?:\s*:\s*(.+))?$/,
     );
     if (flowMatch) {
       const left = flowMatch[1] || flowMatch[2];
       const arrow = flowMatch[3];
       const right = flowMatch[4] || flowMatch[5];
-      const label = stripQuotes(flowMatch[6] || '');
-      const reversed = arrow.startsWith('<');
+      const label = cleanPlantLabel(stripQuotes(flowMatch[6] || '')).replace(/\n+/g, ' ');
+      const reversed = arrow.startsWith('<') && !arrow.endsWith('>');
       const from = reversed ? right : left;
       const to = reversed ? left : right;
 
-      if (!nodesMap.has(from)) {
-        nodesMap.set(from, { id: crypto.randomUUID(), type: 'dfd_gs_entity', code: '', text: from });
-      }
-      if (!nodesMap.has(to)) {
-        nodesMap.set(to, {
-          id: crypto.randomUUID(),
-          type: 'dfd_gs_process',
-          code: `${procCounter++}.0`,
-          text: to,
-        });
-      }
-      flows.push({ from, to, label, dashed: arrow.includes('.') });
+      if (!nodesMap.has(from)) registerNode(from, from, '', '');
+      if (!nodesMap.has(to)) registerNode(to, to, '', '');
+
+      flows.push({ from, to, label, dashed: arrow.includes('.'), color });
     }
   }
 
-  // Layout DFD in 3 semantic columns: External Entities (left/right), Processes (center), Data Stores (bottom/right)
-  const entities = Array.from(nodesMap.entries()).filter(([, n]) => n.type === 'dfd_gs_entity');
-  const processes = Array.from(nodesMap.entries()).filter(([, n]) => n.type === 'dfd_gs_process');
-  const stores = Array.from(nodesMap.entries()).filter(([, n]) => n.type === 'dfd_gs_datastore');
+  const entities = Array.from(nodesMap.entries()).filter(([, n]) => n.role === 'entity');
+  const processes = Array.from(nodesMap.entries()).filter(([, n]) => n.role === 'process');
+  const stores = Array.from(nodesMap.entries()).filter(([, n]) => n.role === 'datastore');
 
   /** @type {import('../types/schema.js').BoardElement[]} */
   const elements = [];
@@ -1357,25 +1496,23 @@ function parseDfd(lines, roughness) {
   const positioned = new Map();
 
   entities.forEach(([alias, n], idx) => {
-    const placeRight = idx > 0 && idx % 2 === 1;
-    const row = Math.floor(idx / 2);
     /** @type {import('../types/schema.js').BoardElement} */
     const el = {
       id: n.id,
-      type: 'dfd_gs_entity',
-      x: placeRight ? 680 : 70,
-      y: 120 + row * 160,
-      width: 156,
-      height: 74,
-      strokeColor: '#0F172A',
-      fillColor: '#F1F5F9',
+      type: entityType,
+      x: 80,
+      y: 100 + idx * 140,
+      width: 164,
+      height: 76,
+      strokeColor: '#1D4ED8',
+      fillColor: '#DBEAFE',
       strokeWidth: 2,
       strokeStyle: 'solid',
       roughness,
       opacity: 1,
       seed: nextSeed(),
       text: n.text,
-      fontSize: 14,
+      fontSize: 13,
       fontFamily: roughness > 0 ? 'sketch' : 'sans',
     };
     elements.push(el);
@@ -1386,13 +1523,13 @@ function parseDfd(lines, roughness) {
     /** @type {import('../types/schema.js').BoardElement} */
     const el = {
       id: n.id,
-      type: 'dfd_gs_process',
-      x: 340,
-      y: 90 + idx * 160,
-      width: 184,
-      height: 98,
-      strokeColor: '#1D4ED8',
-      fillColor: '#DBEAFE',
+      type: processType,
+      x: 480,
+      y: 80 + idx * 180,
+      width: useYourdon ? 148 : 188,
+      height: useYourdon ? 148 : 98,
+      strokeColor: '#B45309',
+      fillColor: '#FEF3C7',
       strokeWidth: 2,
       strokeStyle: 'solid',
       roughness,
@@ -1400,24 +1537,24 @@ function parseDfd(lines, roughness) {
       seed: nextSeed(),
       code: n.code,
       text: n.text,
-      fontSize: 14,
+      fontSize: 13,
       fontFamily: roughness > 0 ? 'sketch' : 'sans',
     };
     elements.push(el);
     positioned.set(alias, el);
   });
 
-  const storeStartY = Math.max(300, 120 + processes.length * 160);
   stores.forEach(([alias, n], idx) => {
+    const storeText = useYourdon ? `${n.code}  ${n.text}`.trim() : n.text;
     /** @type {import('../types/schema.js').BoardElement} */
     const el = {
       id: n.id,
-      type: 'dfd_gs_datastore',
-      x: 332 + idx * 240,
-      y: storeStartY,
-      width: 196,
-      height: 56,
-      strokeColor: '#0F172A',
+      type: storeType,
+      x: 920,
+      y: 100 + idx * 140,
+      width: 224,
+      height: 58,
+      strokeColor: '#15803D',
       fillColor: '#FFFFFF',
       strokeWidth: 2,
       strokeStyle: 'solid',
@@ -1425,8 +1562,8 @@ function parseDfd(lines, roughness) {
       opacity: 1,
       seed: nextSeed(),
       code: n.code,
-      text: n.text,
-      fontSize: 14,
+      text: storeText,
+      fontSize: 13,
       fontFamily: roughness > 0 ? 'sketch' : 'sans',
     };
     elements.push(el);
@@ -1441,6 +1578,7 @@ function parseDfd(lines, roughness) {
       makeBoundConnector(src, dst, {
         label: f.label,
         routing: 'elbow',
+        strokeColor: f.color,
         strokeStyle: f.dashed ? 'dashed' : 'solid',
         startMarker: 'none',
         endMarker: 'filled_arrow',
@@ -1475,30 +1613,42 @@ export function parsePlantText(source, options = {}) {
   }
 
   const requestedKind = options.kind || 'auto';
-  const kind = requestedKind === 'auto' ? detectPlantDiagramKind(lines) : requestedKind;
+  const kind = requestedKind === 'auto' ? detectPlantDiagramKind(lines, source) : requestedKind;
   const roughness = options.renderMode === 'sketch' ? 1.3 : 0;
+  const isYourdon = /yourdon|demarco/i.test(source);
 
   /** @type {import('../types/schema.js').BoardElement[]} */
   let elements = [];
   switch (kind) {
     case 'erd':
-      elements = parseErd(lines, roughness);
+      elements = layoutDiagramElements(parseErd(lines, roughness), { direction: 'LR', kind });
       break;
     case 'class':
-      elements = parseClassDiagram(lines, roughness);
+      elements = layoutDiagramElements(parseClassDiagram(lines, roughness), { direction: 'TB', kind });
       break;
     case 'usecase':
-      elements = parseUseCase(lines, roughness);
+      elements = layoutDiagramElements(parseUseCase(lines, roughness), {
+        direction: 'LR',
+        kind,
+        skipNodeLayout: true,
+      });
       break;
     case 'sequence':
       elements = parseSequence(lines, roughness);
       break;
     case 'flowchart':
-      elements = parseFlowchart(lines, roughness);
+      elements = layoutDiagramElements(parseFlowchart(lines, roughness), {
+        direction: 'TB',
+        kind,
+        skipNodeLayout: true,
+      });
       break;
     case 'dfd':
     default:
-      elements = parseDfd(lines, roughness);
+      elements = layoutDiagramElements(
+        parseDfd(lines, roughness, { notation: isYourdon ? 'yourdon' : 'gane_sarson' }),
+        { direction: 'LR', kind },
+      );
       break;
   }
 
@@ -1511,10 +1661,12 @@ export function parsePlantText(source, options = {}) {
   }
 
   const connectors = elements.filter((e) => e.type === 'connector').length;
+  const kindLabel =
+    kind === 'dfd' && isYourdon ? 'DFD (Yourdon & DeMarco)' : PLANT_KIND_LABELS[kind];
   return {
     ok: true,
     kind,
-    kindLabel: PLANT_KIND_LABELS[kind],
+    kindLabel,
     elements,
     summary: {
       nodes: elements.length - connectors,

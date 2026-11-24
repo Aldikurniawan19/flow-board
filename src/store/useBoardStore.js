@@ -1,5 +1,27 @@
 import { create } from 'zustand';
+import { clampZoom } from '../engine/camera.js';
+import { computeSceneBounds } from '../engine/exporter.js';
+import { layoutDiagramElements } from '../engine/autoLayout.js';
 import { apiClient } from './apiClient.js';
+
+/**
+ * Compute camera transform that fits all elements cleanly inside the visible viewport.
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ */
+function computeFitCamera(elements) {
+  if (elements.length === 0) return { x: 0, y: 0, zoom: 1 };
+  const bounds = computeSceneBounds(elements);
+  const viewW =
+    typeof window !== 'undefined' ? Math.max(420, window.innerWidth - 540) : 960;
+  const viewH =
+    typeof window !== 'undefined' ? Math.max(320, window.innerHeight - 110) : 640;
+  const zoom = clampZoom(Math.min(viewW / bounds.width, viewH / bounds.height, 1));
+  return {
+    zoom,
+    x: Math.round(viewW / 2 - (bounds.x + bounds.width / 2) * zoom),
+    y: Math.round(viewH / 2 - (bounds.y + bounds.height / 2) * zoom),
+  };
+}
 
 const MAX_HISTORY = 60;
 
@@ -580,13 +602,33 @@ export const useBoardStore = create((set, get) => ({
         elements: nextElements,
         selectedIds: generatedElements.map((e) => e.id),
         editingId: null,
-        camera: options.mode === 'replace' ? { x: 0, y: 0, zoom: 1 } : state.camera,
+        camera: options.mode === 'replace' ? computeFitCamera(nextElements) : state.camera,
         feedback: {
           type: 'success',
           message: `${options.label} berhasil digenerate dari PlantText (${generatedElements.length} elemen).`,
         },
       };
     });
+    get().scheduleAutosave();
+  },
+
+  /** @param {'LR' | 'TB'} [direction] */
+  autoLayoutBoard: (direction = 'LR') => {
+    const { elements } = get();
+    if (elements.length === 0) return;
+    const arranged = layoutDiagramElements(elements, { direction });
+    set((state) => ({
+      past: appendHistory(state.past, state.elements),
+      future: [],
+      elements: arranged,
+      selectedIds: [],
+      editingId: null,
+      camera: computeFitCamera(arranged),
+      feedback: {
+        type: 'success',
+        message: `Tata letak dirapikan (${direction === 'LR' ? 'Kiri ke Kanan' : 'Atas ke Bawah'}).`,
+      },
+    }));
     get().scheduleAutosave();
   },
 }));

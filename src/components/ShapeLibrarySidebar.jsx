@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, LayoutTemplate, Search, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  LayoutTemplate,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+} from 'lucide-react';
 import { SHAPE_CATEGORIES, SHAPE_DEFINITIONS, createElementFromShape } from '../engine/shapeRegistry.js';
 import { STARTER_TEMPLATES } from '../constants/templates.js';
 import { useBoardStore } from '../store/useBoardStore.js';
@@ -34,9 +41,9 @@ function ShapePreviewIcon({ preview }) {
 }
 
 /**
- * @param {{ open: boolean, onClose: () => void }} props
+ * @param {{ open: boolean, onToggle: () => void }} props
  */
-export function ShapeLibrarySidebar({ open, onClose }) {
+export function ShapeLibrarySidebar({ open, onToggle }) {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(() => ({
     basic: true,
@@ -70,7 +77,22 @@ export function ShapeLibrarySidebar({ open, onClose }) {
     }).filter((group) => group.items.length > 0);
   }, [normalizedQuery]);
 
-  if (!open) return null;
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        title="Buka Komponen Diagram ([)"
+        aria-label="Buka pustaka bentuk diagram ([)"
+        className="fixed left-3 top-16 z-20 inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-2 text-xs font-medium text-[#0F172A] shadow-sm hover:bg-[#F1F5F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+      >
+        <PanelLeftOpen className="h-4 w-4 text-[#475569]" strokeWidth={1.75} aria-hidden="true" />
+        <span aria-hidden="true" className="text-[10px] font-mono-tabular text-[#475569]">
+          [
+        </span>
+      </button>
+    );
+  }
 
   /**
    * Insert shape near center of current viewport when user clicks an item.
@@ -97,11 +119,15 @@ export function ShapeLibrarySidebar({ open, onClose }) {
           </h2>
           <button
             type="button"
-            onClick={onClose}
-            aria-label="Tutup panel komponen"
-            className="md:hidden p-1 rounded text-[#475569] hover:bg-[#F1F5F9]"
+            onClick={onToggle}
+            title="Tutup Komponen Diagram ([)"
+            aria-label="Tutup panel komponen ([)"
+            className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
           >
-            <X className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            <span aria-hidden="true" className="text-[10px] font-mono-tabular">
+              [
+            </span>
+            <PanelLeftClose className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
 

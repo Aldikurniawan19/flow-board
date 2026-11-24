@@ -4,6 +4,8 @@ import {
   ArrowUpToLine,
   Copy,
   Lock,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   RotateCcw,
   Trash2,
@@ -51,9 +53,9 @@ function getSharedValue(list, getter) {
 }
 
 /**
- * @param {{ open: boolean, onClose: () => void }} props
+ * @param {{ open: boolean, onToggle: () => void }} props
  */
-export function InspectorPanel({ open, onClose }) {
+export function InspectorPanel({ open, onToggle }) {
   const elements = useBoardStore((s) => s.elements);
   const selectedIds = useBoardStore((s) => s.selectedIds);
   const settings = useBoardStore((s) => s.settings);
@@ -69,8 +71,24 @@ export function InspectorPanel({ open, onClose }) {
   const reorderSelected = useBoardStore((s) => s.reorderSelected);
   const setDefaultStyle = useBoardStore((s) => s.setDefaultStyle);
   const updateSettings = useBoardStore((s) => s.updateSettings);
+  const autoLayoutBoard = useBoardStore((s) => s.autoLayoutBoard);
 
-  if (!open) return null;
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        title="Buka Pengaturan Papan (])"
+        aria-label="Buka panel properti elemen (])"
+        className="fixed right-3 top-16 z-20 inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-2 text-xs font-medium text-[#0F172A] shadow-sm hover:bg-[#F1F5F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+      >
+        <span aria-hidden="true" className="text-[10px] font-mono-tabular text-[#475569]">
+          ]
+        </span>
+        <PanelRightOpen className="h-4 w-4 text-[#475569]" strokeWidth={1.75} aria-hidden="true" />
+      </button>
+    );
+  }
 
   const selectedElements = elements.filter((e) => selectedIds.includes(e.id));
   const isMulti = selectedElements.length > 1;
@@ -129,11 +147,15 @@ export function InspectorPanel({ open, onClose }) {
         </h2>
         <button
           type="button"
-          onClick={onClose}
-          aria-label="Tutup panel properti"
-          className="lg:hidden p-1 rounded text-[#475569] hover:bg-[#F1F5F9]"
+          onClick={onToggle}
+          title="Tutup Pengaturan Papan (])"
+          aria-label="Tutup panel properti (])"
+          className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
         >
-          <X className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+          <span aria-hidden="true" className="text-[10px] font-mono-tabular">
+            ]
+          </span>
+          <PanelRightClose className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
         </button>
       </div>
 
@@ -257,6 +279,27 @@ export function InspectorPanel({ open, onClose }) {
                   className="h-4 w-4 accent-[#1D4ED8]"
                 />
               </label>
+              <div className="pt-2 border-t border-[#E2E8F0] space-y-2">
+                <span className="block font-semibold text-[#0F172A]">Rapikan Tata Letak</span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={elements.length === 0}
+                    onClick={() => autoLayoutBoard('LR')}
+                    className="py-1.5 px-2 rounded-lg border border-[#E2E8F0] text-[#0F172A] hover:bg-[#F1F5F9] disabled:opacity-40 font-medium"
+                  >
+                    Kiri → Kanan
+                  </button>
+                  <button
+                    type="button"
+                    disabled={elements.length === 0}
+                    onClick={() => autoLayoutBoard('TB')}
+                    className="py-1.5 px-2 rounded-lg border border-[#E2E8F0] text-[#0F172A] hover:bg-[#F1F5F9] disabled:opacity-40 font-medium"
+                  >
+                    Atas → Bawah
+                  </button>
+                </div>
+              </div>
               <div className="pt-2 border-t border-[#E2E8F0] flex items-center justify-between text-[#475569]">
                 <span>Total Elemen</span>
                 <span className="font-mono-tabular font-semibold text-[#0F172A]">

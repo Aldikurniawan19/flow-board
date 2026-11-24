@@ -5,7 +5,7 @@ import { getElementBounds, getResizeHandles } from './geometry.js';
 import { drawCanvasMarker } from './markers.js';
 import { getShapePorts, isConnectableElement } from './ports.js';
 import { computeConnectorPath } from './router.js';
-import { applyStrokeDash, drawShapeElement } from './shapeRegistry.js';
+import { applyStrokeDash, drawShapeElement, wrapTextLines } from './shapeRegistry.js';
 
 /**
  * Convert perfect-freehand polygon points into a smooth SVG path string.
@@ -151,26 +151,37 @@ export function drawConnectorElement(ctx, el, elementsById, rc) {
   drawCanvasMarker(ctx, last, routed.endAngle, el.endMarker, el.strokeColor, el.strokeWidth);
 
   if (el.text && el.text.trim()) {
-    const fontSize = el.fontSize || 12;
+    const fontSize = Math.min(el.fontSize || 11, 14);
     const family = FONT_FAMILY_MAP[el.fontFamily || 'sans'];
     ctx.setLineDash([]);
     ctx.font = `500 ${fontSize}px ${family}`;
-    const textW = ctx.measureText(el.text).width;
+
+    const lines = wrapTextLines(ctx, el.text.trim(), 144);
+    const lineH = fontSize * 1.3;
+    const maxLineW = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
     const padX = 6;
     const padY = 3;
-    const bx = routed.labelPosition.x - textW / 2 - padX;
-    const by = routed.labelPosition.y - fontSize / 2 - padY;
+    const boxW = maxLineW + padX * 2;
+    const boxH = lines.length * lineH + padY * 2;
+    const bx = routed.labelPosition.x - boxW / 2;
+    const by = routed.labelPosition.y - boxH / 2;
 
     ctx.fillStyle = '#FFFFFF';
-    ctx.strokeStyle = '#E2E8F0';
+    ctx.strokeStyle = '#CBD5E1';
     ctx.lineWidth = 1;
-    ctx.fillRect(bx, by, textW + padX * 2, fontSize + padY * 2);
-    ctx.strokeRect(bx, by, textW + padX * 2, fontSize + padY * 2);
+    ctx.beginPath();
+    ctx.roundRect?.(bx, by, boxW, boxH, 4);
+    if (!ctx.roundRect) ctx.rect(bx, by, boxW, boxH);
+    ctx.fill();
+    ctx.stroke();
 
     ctx.fillStyle = '#0F172A';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(el.text, routed.labelPosition.x, routed.labelPosition.y);
+    lines.forEach((line, idx) => {
+      const ly = by + padY + lineH / 2 + idx * lineH;
+      ctx.fillText(line, routed.labelPosition.x, ly);
+    });
   }
 
   ctx.restore();

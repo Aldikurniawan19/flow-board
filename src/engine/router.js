@@ -316,6 +316,8 @@ export function computeConnectorPath(connector, elementsById) {
   const customWaypoints =
     connector.waypoints && connector.waypoints.length > 0 ? connector.waypoints : null;
 
+  const labelPos = connector.labelPos || null;
+
   // Custom user-defined bend/corner waypoints take priority across all routing modes
   if (customWaypoints) {
     const controlVertices = [start, ...customWaypoints, end];
@@ -334,7 +336,7 @@ export function computeConnectorPath(connector, elementsById) {
         ...handles,
         startAngle: Math.atan2(p0.y - p1.y, p0.x - p1.x),
         endAngle: Math.atan2(last.y - penult.y, last.x - penult.x),
-        labelPosition: polylineMidpoint(sampled),
+        labelPosition: labelPos || polylineMidpoint(sampled),
         cubic: null,
       };
     }
@@ -351,7 +353,7 @@ export function computeConnectorPath(connector, elementsById) {
       ...handles,
       startAngle: Math.atan2(first.y - second.y, first.x - second.x),
       endAngle: Math.atan2(last.y - penult.y, last.x - penult.x),
-      labelPosition: polylineMidpoint(controlVertices),
+      labelPosition: labelPos || polylineMidpoint(controlVertices),
       cubic: null,
     };
   }
@@ -367,7 +369,7 @@ export function computeConnectorPath(connector, elementsById) {
       ...handles,
       startAngle: angle + Math.PI,
       endAngle: angle,
-      labelPosition: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
+      labelPosition: labelPos || { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
       cubic: null,
     };
   }
@@ -398,7 +400,7 @@ export function computeConnectorPath(connector, elementsById) {
       midpointHandles: [{ insertIndex: 0, x: mid.x, y: mid.y }],
       startAngle: Math.atan2(start.y - cp1.y, start.x - cp1.x),
       endAngle: Math.atan2(end.y - cp2.y, end.x - cp2.x),
-      labelPosition: mid,
+      labelPosition: labelPos || mid,
       cubic: { start, cp1, cp2, end },
     };
   }
@@ -417,7 +419,7 @@ export function computeConnectorPath(connector, elementsById) {
     ...handles,
     startAngle: Math.atan2(first.y - second.y, first.x - second.x),
     endAngle: Math.atan2(last.y - penult.y, last.x - penult.x),
-    labelPosition: polylineMidpoint(points),
+    labelPosition: labelPos || polylineMidpoint(points),
     cubic: null,
   };
 }
