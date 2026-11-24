@@ -1,0 +1,197 @@
+import { useState } from 'react';
+import { AlertCircle, Layers, Loader2, Lock, Mail, User } from 'lucide-react';
+import { useBoardStore } from '../store/useBoardStore.js';
+
+export function AuthScreen() {
+  const [mode, setMode] = useState(/** @type {'login' | 'register'} */ ('login'));
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const login = useBoardStore((s) => s.login);
+  const register = useBoardStore((s) => s.register);
+
+  /** @param {import('react').FormEvent} e */
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+    setSubmitting(true);
+    try {
+      if (mode === 'login') {
+        await login(email.trim(), password);
+      } else {
+        await register(name.trim(), email.trim(), password);
+      }
+    } catch (err) {
+      setError(err?.message || 'Proses autentikasi gagal. Periksa kembali data Anda.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-4 py-12">
+      <div className="w-full max-w-md bg-[#FFFFFF] border border-[#E2E8F0] rounded-xl p-6 sm:p-8 shadow-sm">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-10 w-10 rounded-lg bg-[#1D4ED8] text-white flex items-center justify-center shrink-0">
+            <Layers className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight text-[#0F172A]">FlowBoard</h1>
+            <p className="text-xs text-[#475569]">
+              Papan tulis bebas & diagram perancangan (DFD, ERD, UML, Flowchart)
+            </p>
+          </div>
+        </div>
+
+        <div
+          role="tablist"
+          aria-label="Mode autentikasi"
+          className="grid grid-cols-2 gap-1 p-1 bg-[#F1F5F9] rounded-lg mb-6"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'login'}
+            onClick={() => {
+              setMode('login');
+              setError('');
+            }}
+            className={`py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+              mode === 'login'
+                ? 'bg-[#FFFFFF] text-[#0F172A] shadow-xs'
+                : 'text-[#475569] hover:text-[#0F172A]'
+            }`}
+          >
+            Masuk
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'register'}
+            onClick={() => {
+              setMode('register');
+              setError('');
+            }}
+            className={`py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+              mode === 'register'
+                ? 'bg-[#FFFFFF] text-[#0F172A] shadow-xs'
+                : 'text-[#475569] hover:text-[#0F172A]'
+            }`}
+          >
+            Daftar Akun
+          </button>
+        </div>
+
+        {error && (
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-2 rounded-lg border border-[#B91C1C]/30 bg-[#FEE2E2] px-3 py-2.5 text-sm text-[#B91C1C]"
+          >
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" strokeWidth={1.75} aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'register' && (
+            <div>
+              <label htmlFor="auth-name" className="block text-xs font-medium text-[#475569] mb-1.5">
+                Nama Lengkap
+              </label>
+              <div className="relative">
+                <User
+                  className="h-4 w-4 text-[#475569] absolute left-3 top-1/2 -translate-y-1/2"
+                  strokeWidth={1.75}
+                  aria-hidden="true"
+                />
+                <input
+                  id="auth-name"
+                  type="text"
+                  required
+                  minLength={2}
+                  maxLength={80}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Nama Anda"
+                  autoComplete="name"
+                  className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] pl-9 pr-3 py-2 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/20"
+                />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="auth-email" className="block text-xs font-medium text-[#475569] mb-1.5">
+              Alamat Email
+            </label>
+            <div className="relative">
+              <Mail
+                className="h-4 w-4 text-[#475569] absolute left-3 top-1/2 -translate-y-1/2"
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
+              <input
+                id="auth-email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="nama@contoh.com"
+                autoComplete="email"
+                className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] pl-9 pr-3 py-2 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/20"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="auth-password" className="block text-xs font-medium text-[#475569] mb-1.5">
+              Kata Sandi
+            </label>
+            <div className="relative">
+              <Lock
+                className="h-4 w-4 text-[#475569] absolute left-3 top-1/2 -translate-y-1/2"
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
+              <input
+                id="auth-password"
+                type="password"
+                required
+                minLength={mode === 'register' ? 8 : 1}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={mode === 'register' ? 'Minimal 8 karakter' : 'Masukkan kata sandi'}
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] pl-9 pr-3 py-2 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/20"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-[#1D4ED8] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] focus-visible:ring-offset-2 disabled:opacity-50"
+          >
+            {submitting && <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} aria-hidden="true" />}
+            <span>
+              {submitting
+                ? mode === 'login'
+                  ? 'Memproses masuk...'
+                  : 'Mendaftarkan akun...'
+                : mode === 'login'
+                  ? 'Masuk ke FlowBoard'
+                  : 'Buat Akun Baru'}
+            </span>
+          </button>
+        </form>
+
+        <p className="mt-5 text-xs text-[#475569] text-center">
+          Setiap papan kerja tersimpan aman per akun di server lokal dan dapat diekspor ke PNG, SVG, maupun JSON.
+        </p>
+      </div>
+    </main>
+  );
+}

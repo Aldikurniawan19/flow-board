@@ -1,0 +1,844 @@
+import {
+  ArrowDownToLine,
+  ArrowLeftRight,
+  ArrowUpToLine,
+  Copy,
+  Lock,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Unlock,
+  X,
+} from 'lucide-react';
+import {
+  CANVAS_FILL_SWATCHES,
+  CANVAS_STROKE_SWATCHES,
+  STROKE_WIDTH_OPTIONS,
+} from '../constants/tokens.js';
+import { useBoardStore } from '../store/useBoardStore.js';
+import { MarkerPicker } from './MarkerPicker.jsx';
+
+const FONT_SIZE_OPTIONS = [
+  { label: '12', value: 12 },
+  { label: '14', value: 14 },
+  { label: '18', value: 18 },
+  { label: '24', value: 24 },
+];
+
+const OPACITY_OPTIONS = [
+  { label: '100%', value: 1 },
+  { label: '80%', value: 0.8 },
+  { label: '60%', value: 0.6 },
+  { label: '40%', value: 0.4 },
+];
+
+const NON_FILLABLE_TYPES = new Set(['connector', 'freehand', 'text', 'uml_actor']);
+
+/**
+ * Return the shared value across a list of elements, or `'__mixed__'` if values differ.
+ * @template T
+ * @param {import('../types/schema.js').BoardElement[]} list
+ * @param {(el: import('../types/schema.js').BoardElement) => T} getter
+ * @returns {T | '__mixed__' | undefined}
+ */
+function getSharedValue(list, getter) {
+  if (list.length === 0) return undefined;
+  const first = getter(list[0]);
+  for (let i = 1; i < list.length; i += 1) {
+    if (getter(list[i]) !== first) return '__mixed__';
+  }
+  return first;
+}
+
+/**
+ * @param {{ open: boolean, onClose: () => void }} props
+ */
+export function InspectorPanel({ open, onClose }) {
+  const elements = useBoardStore((s) => s.elements);
+  const selectedIds = useBoardStore((s) => s.selectedIds);
+  const settings = useBoardStore((s) => s.settings);
+  const defaultStrokeColor = useBoardStore((s) => s.defaultStrokeColor);
+  const defaultFillColor = useBoardStore((s) => s.defaultFillColor);
+  const defaultRouting = useBoardStore((s) => s.defaultRouting);
+  const defaultEndMarker = useBoardStore((s) => s.defaultEndMarker);
+
+  const updateSelectedElements = useBoardStore((s) => s.updateSelectedElements);
+  const updateElementById = useBoardStore((s) => s.updateElementById);
+  const deleteSelected = useBoardStore((s) => s.deleteSelected);
+  const duplicateSelected = useBoardStore((s) => s.duplicateSelected);
+  const reorderSelected = useBoardStore((s) => s.reorderSelected);
+  const setDefaultStyle = useBoardStore((s) => s.setDefaultStyle);
+  const updateSettings = useBoardStore((s) => s.updateSettings);
+
+  if (!open) return null;
+
+  const selectedElements = elements.filter((e) => selectedIds.includes(e.id));
+  const isMulti = selectedElements.length > 1;
+  const primary = selectedElements.length === 1 ? selectedElements[0] : null;
+
+  const connectorElements = selectedElements.filter((e) => e.type === 'connector');
+  const fillableElements = selectedElements.filter((e) => !NON_FILLABLE_TYPES.has(e.type));
+  const textElements = selectedElements.filter((e) => e.type !== 'freehand');
+  const styleLineElements = selectedElements.filter((e) => e.type !== 'freehand' && e.type !== 'text');
+  const renderableElements = selectedElements.filter((e) => e.type !== 'freehand');
+
+  const isConnectorOnly = primary?.type === 'connector';
+  const isErdTable = primary?.type === 'erd_table' || primary?.type === 'erd_weak_table';
+  const isUmlClass = primary?.type === 'uml_class' || primary?.type === 'uml_interface';
+  const hasCodeField =
+    primary?.type === 'dfd_gs_process' ||
+    primary?.type === 'dfd_gs_datastore' ||
+    primary?.type === 'dfd_yd_process' ||
+    primary?.type === 'uml_fragment';
+
+  const allLocked = selectedElements.length > 0 && selectedElements.every((e) => Boolean(e.locked));
+
+  // Shared values for active button highlights (supports single & multi-select)
+  const sharedStrokeColor = getSharedValue(selectedElements, (e) => e.strokeColor);
+  const sharedFillColor = getSharedValue(fillableElements, (e) => e.fillColor);
+  const sharedStrokeWidth = getSharedValue(selectedElements, (e) => e.strokeWidth);
+  const sharedStrokeStyle = getSharedValue(styleLineElements, (e) => e.strokeStyle);
+  const sharedRenderMode = getSharedValue(renderableElements, (e) => (e.roughness > 0 ? 'sketch' : 'clean'));
+  const sharedFontFamily = getSharedValue(textElements, (e) => e.fontFamily || 'sans');
+  const sharedFontSize = getSharedValue(textElements, (e) => e.fontSize || (e.type === 'connector' ? 12 : 14));
+  const sharedOpacity = getSharedValue(selectedElements, (e) => e.opacity);
+  const sharedRouting = getSharedValue(connectorElements, (e) => e.routing || 'elbow');
+  const sharedStartMarker = getSharedValue(connectorElements, (e) => e.startMarker || 'none');
+  const sharedEndMarker = getSharedValue(connectorElements, (e) => e.endMarker || 'none');
+
+  /** @param {string} id @param {import('../types/schema.js').ErdField[]} fields */
+  function syncErdFields(id, fields) {
+    const nextHeight = Math.max(96, 40 + fields.length * 24 + 8);
+    updateElementById(id, { fields, height: nextHeight });
+  }
+
+  return (
+    <aside
+      aria-label="Panel properti elemen"
+      className="w-72 shrink-0 bg-[#FFFFFF] border-l border-[#E2E8F0] flex flex-col h-full z-20 max-lg:fixed max-lg:right-0 max-lg:top-14 max-lg:bottom-0 max-lg:shadow-sm"
+    >
+      <div className="px-3 py-2.5 border-b border-[#E2E8F0] flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-[#475569]">
+          {selectedElements.length === 0
+            ? 'Pengaturan Papan'
+            : isMulti
+              ? `${selectedElements.length} Elemen Dipilih`
+              : isConnectorOnly
+                ? 'Properti Konektor'
+                : 'Properti Elemen'}
+        </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Tutup panel properti"
+          className="lg:hidden p-1 rounded text-[#475569] hover:bg-[#F1F5F9]"
+        >
+          <X className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-4 text-xs">
+        {selectedElements.length === 0 ? (
+          <>
+            <section className="space-y-2">
+              <h3 className="font-semibold text-[#0F172A]">Gaya Default Gambar</h3>
+              <div>
+                <span className="block text-[#475569] mb-1.5">Warna Garis Default</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {CANVAS_STROKE_SWATCHES.map((sw) => (
+                    <button
+                      key={sw.value}
+                      type="button"
+                      onClick={() => setDefaultStyle({ defaultStrokeColor: sw.value })}
+                      title={sw.label}
+                      aria-label={sw.label}
+                      className={`h-6 w-6 rounded-md border ${
+                        defaultStrokeColor === sw.value
+                          ? 'ring-2 ring-[#1D4ED8] ring-offset-1 border-[#0F172A]'
+                          : 'border-[#E2E8F0]'
+                      }`}
+                      style={{ backgroundColor: sw.value }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <span className="block text-[#475569] mb-1.5">Warna Isi Default</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {CANVAS_FILL_SWATCHES.map((sw) => (
+                    <button
+                      key={sw.value}
+                      type="button"
+                      onClick={() => setDefaultStyle({ defaultFillColor: sw.value })}
+                      title={sw.label}
+                      aria-label={sw.label}
+                      className={`h-6 w-6 rounded-md border ${
+                        defaultFillColor === sw.value
+                          ? 'ring-2 ring-[#1D4ED8] ring-offset-1 border-[#0F172A]'
+                          : 'border-[#CBD5E1]'
+                      }`}
+                      style={{
+                        backgroundColor: sw.value === 'transparent' ? '#FFFFFF' : sw.value,
+                        backgroundImage:
+                          sw.value === 'transparent'
+                            ? 'linear-gradient(135deg, transparent 45%, #B91C1C 45%, #B91C1C 55%, transparent 55%)'
+                            : undefined,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-2 pt-3 border-t border-[#E2E8F0]">
+              <h3 className="font-semibold text-[#0F172A]">Default Konektor</h3>
+              <div>
+                <label htmlFor="default-routing" className="block text-[#475569] mb-1">
+                  Tipe Jalur
+                </label>
+                <select
+                  id="default-routing"
+                  value={defaultRouting}
+                  onChange={(e) => setDefaultStyle({ defaultRouting: e.target.value })}
+                  className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs text-[#0F172A]"
+                >
+                  <option value="elbow">Siku 90° (Orthogonal)</option>
+                  <option value="straight">Garis Lurus</option>
+                  <option value="curved">Kurva Halus</option>
+                </select>
+              </div>
+              <MarkerPicker
+                id="default-end-marker"
+                label="Ujung Akhir Default"
+                value={defaultEndMarker}
+                direction="end"
+                onChange={(val) => setDefaultStyle({ defaultEndMarker: val })}
+              />
+            </section>
+
+            <section className="space-y-2 pt-3 border-t border-[#E2E8F0]">
+              <h3 className="font-semibold text-[#0F172A]">Kanvas & Grid</h3>
+              <div className="grid grid-cols-3 gap-1">
+                {[
+                  { id: 'dots', label: 'Titik' },
+                  { id: 'lines', label: 'Garis' },
+                  { id: 'none', label: 'Polos' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => updateSettings({ gridMode: opt.id })}
+                    className={`py-1.5 rounded-md border font-medium ${
+                      settings.gridMode === opt.id
+                        ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                        : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center justify-between py-1 text-[#0F172A] cursor-pointer">
+                <span>Snap ke Grid (20px)</span>
+                <input
+                  type="checkbox"
+                  checked={settings.snapToGrid}
+                  onChange={(e) => updateSettings({ snapToGrid: e.target.checked })}
+                  className="h-4 w-4 accent-[#1D4ED8]"
+                />
+              </label>
+              <label className="flex items-center justify-between py-1 text-[#0F172A] cursor-pointer">
+                <span>Koreksi Bentuk Pena</span>
+                <input
+                  type="checkbox"
+                  checked={settings.autoCorrectShapes !== false}
+                  onChange={(e) => updateSettings({ autoCorrectShapes: e.target.checked })}
+                  className="h-4 w-4 accent-[#1D4ED8]"
+                />
+              </label>
+              <div className="pt-2 border-t border-[#E2E8F0] flex items-center justify-between text-[#475569]">
+                <span>Total Elemen</span>
+                <span className="font-mono-tabular font-semibold text-[#0F172A]">
+                  {elements.length}
+                </span>
+              </div>
+            </section>
+          </>
+        ) : (
+          <>
+            {/* Quick Actions (works for single & multi-select) */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => duplicateSelected()}
+                title="Duplikat (Ctrl+D)"
+                className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-[#E2E8F0] py-1.5 text-[#0F172A] hover:bg-[#F1F5F9]"
+              >
+                <Copy className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                <span>Duplikat</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => updateSelectedElements({ locked: !allLocked })}
+                title={allLocked ? 'Buka Kunci Semua' : 'Kunci Posisi'}
+                aria-label={allLocked ? 'Buka kunci elemen terpilih' : 'Kunci elemen terpilih'}
+                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]"
+              >
+                {allLocked ? (
+                  <Lock className="h-3.5 w-3.5 text-[#B45309]" strokeWidth={1.75} aria-hidden="true" />
+                ) : (
+                  <Unlock className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteSelected()}
+                title="Hapus (Del)"
+                aria-label="Hapus elemen terpilih"
+                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-[#B91C1C]/30 text-[#B91C1C] hover:bg-[#FEE2E2]"
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            </div>
+
+            {isMulti && (
+              <div className="rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] px-2.5 py-2 text-[11px] text-[#475569] flex flex-wrap gap-x-3 gap-y-1">
+                <span>
+                  Komponen:{' '}
+                  <strong className="font-mono-tabular text-[#0F172A]">
+                    {selectedElements.length - connectorElements.length}
+                  </strong>
+                </span>
+                <span>
+                  Garis/Konektor:{' '}
+                  <strong className="font-mono-tabular text-[#0F172A]">
+                    {connectorElements.length}
+                  </strong>
+                </span>
+              </div>
+            )}
+
+            {/* Single-element Label & Code */}
+            {primary && primary.type !== 'freehand' && (
+              <section className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+                {hasCodeField && (
+                  <div>
+                    <label htmlFor="prop-code" className="block text-[#475569] mb-1">
+                      Kode / Tag (contoh: 1.0, D1, alt)
+                    </label>
+                    <input
+                      id="prop-code"
+                      type="text"
+                      value={primary.code || ''}
+                      onChange={(e) => updateElementById(primary.id, { code: e.target.value })}
+                      className="w-full rounded-lg border border-[#E2E8F0] px-2.5 py-1.5 text-xs font-mono-tabular text-[#0F172A]"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label htmlFor="prop-text" className="block text-[#475569] mb-1">
+                    {isErdTable ? 'Nama Tabel / Entitas' : isConnectorOnly ? 'Label Aliran / Relasi' : 'Label Teks'}
+                  </label>
+                  <textarea
+                    id="prop-text"
+                    rows={isConnectorOnly || isErdTable ? 1 : 2}
+                    value={primary.text || ''}
+                    onChange={(e) => updateElementById(primary.id, { text: e.target.value })}
+                    className="w-full rounded-lg border border-[#E2E8F0] px-2.5 py-1.5 text-xs text-[#0F172A] resize-y"
+                  />
+                </div>
+              </section>
+            )}
+
+            {/* Connector properties (works for single connector OR multi-select containing connectors) */}
+            {connectorElements.length > 0 && (
+              <section className="space-y-2.5 pt-2 border-t border-[#E2E8F0]">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-semibold text-[#0F172A]">
+                    Konektor & Garis{isMulti ? ` (${connectorElements.length})` : ''}
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    {connectorElements.some((c) => c.waypoints && c.waypoints.length > 0) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSelectedElements((el) =>
+                            el.type === 'connector' ? { waypoints: undefined } : null,
+                          )
+                        }
+                        title="Kembalikan jalur garis ke rute otomatis"
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[#475569] hover:text-[#0F172A]"
+                      >
+                        <RotateCcw className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                        Reset Sudut
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedElements((el) =>
+                          el.type === 'connector'
+                            ? {
+                                startMarker: el.endMarker || 'none',
+                                endMarker: el.startMarker || 'none',
+                              }
+                            : null,
+                        )
+                      }
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-[#1D4ED8] hover:underline"
+                    >
+                      <ArrowLeftRight className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                      Tukar Ujung
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-[#475569]">
+                  Seret titik sudut biru untuk menggeser, seret titik tengah garis untuk menambah sudut, atau klik 2x titik untuk menghapus.
+                </p>
+
+                <div>
+                  <span className="block text-[#475569] mb-1">Rute Garis</span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      { id: 'elbow', label: 'Siku 90°' },
+                      { id: 'straight', label: 'Lurus' },
+                      { id: 'curved', label: 'Kurva' },
+                    ].map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() =>
+                          updateSelectedElements((el) =>
+                            el.type === 'connector' ? { routing: r.id } : null,
+                          )
+                        }
+                        className={`py-1.5 rounded-md border font-medium ${
+                          sharedRouting === r.id
+                            ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                            : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <MarkerPicker
+                  id="prop-start-marker"
+                  label="Ujung Awal (Start)"
+                  value={sharedStartMarker === '__mixed__' ? 'none' : sharedStartMarker || 'none'}
+                  mixed={sharedStartMarker === '__mixed__'}
+                  direction="start"
+                  onChange={(val) =>
+                    updateSelectedElements((el) =>
+                      el.type === 'connector' ? { startMarker: val } : null,
+                    )
+                  }
+                />
+
+                <MarkerPicker
+                  id="prop-end-marker"
+                  label="Ujung Akhir (End)"
+                  value={sharedEndMarker === '__mixed__' ? 'none' : sharedEndMarker || 'none'}
+                  mixed={sharedEndMarker === '__mixed__'}
+                  direction="end"
+                  onChange={(val) =>
+                    updateSelectedElements((el) =>
+                      el.type === 'connector' ? { endMarker: val } : null,
+                    )
+                  }
+                />
+              </section>
+            )}
+
+            {/* ERD Table Fields Editor (single selection) */}
+            {isErdTable && primary && (
+              <section className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-[#0F172A]">Kolom Tabel ERD</h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = [
+                        ...(primary.fields || []),
+                        { id: crypto.randomUUID(), key: '', name: 'column_name', type: 'VARCHAR' },
+                      ];
+                      syncErdFields(primary.id, next);
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-[#1D4ED8] hover:underline"
+                  >
+                    <Plus className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                    Tambah Kolom
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  {(primary.fields || []).map((field, idx) => (
+                    <div key={field.id} className="grid grid-cols-[54px_1fr_64px_22px] gap-1 items-center">
+                      <select
+                        aria-label={`Kunci kolom ${idx + 1}`}
+                        value={field.key}
+                        onChange={(e) => {
+                          const next = [...(primary.fields || [])];
+                          next[idx] = { ...field, key: /** @type {any} */ (e.target.value) };
+                          syncErdFields(primary.id, next);
+                        }}
+                        className="rounded border border-[#E2E8F0] bg-[#FFFFFF] px-1 py-1 text-[11px] font-mono-tabular"
+                      >
+                        <option value="">-</option>
+                        <option value="PK">PK</option>
+                        <option value="FK">FK</option>
+                        <option value="PK,FK">PK,FK</option>
+                      </select>
+                      <input
+                        aria-label={`Nama kolom ${idx + 1}`}
+                        type="text"
+                        value={field.name}
+                        onChange={(e) => {
+                          const next = [...(primary.fields || [])];
+                          next[idx] = { ...field, name: e.target.value };
+                          syncErdFields(primary.id, next);
+                        }}
+                        className="min-w-0 rounded border border-[#E2E8F0] px-1.5 py-1 text-[11px]"
+                      />
+                      <input
+                        aria-label={`Tipe data kolom ${idx + 1}`}
+                        type="text"
+                        value={field.type}
+                        onChange={(e) => {
+                          const next = [...(primary.fields || [])];
+                          next[idx] = { ...field, type: e.target.value };
+                          syncErdFields(primary.id, next);
+                        }}
+                        className="min-w-0 rounded border border-[#E2E8F0] px-1 py-1 text-[11px] font-mono-tabular"
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Hapus kolom ${idx + 1}`}
+                        onClick={() => {
+                          const next = (primary.fields || []).filter((_, i) => i !== idx);
+                          syncErdFields(primary.id, next);
+                        }}
+                        className="p-0.5 text-[#475569] hover:text-[#B91C1C]"
+                      >
+                        <X className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* UML Class Editor (single selection) */}
+            {isUmlClass && primary && (
+              <section className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+                <h3 className="font-semibold text-[#0F172A]">Struktur Kelas UML</h3>
+                <div>
+                  <label htmlFor="uml-stereo" className="block text-[#475569] mb-1">
+                    Stereotype
+                  </label>
+                  <input
+                    id="uml-stereo"
+                    type="text"
+                    value={primary.stereotype || ''}
+                    placeholder="<<interface>>"
+                    onChange={(e) => updateElementById(primary.id, { stereotype: e.target.value })}
+                    className="w-full rounded-lg border border-[#E2E8F0] px-2 py-1 text-xs font-mono-tabular"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="uml-attrs" className="block text-[#475569] mb-1">
+                    Atribut (1 per baris)
+                  </label>
+                  <textarea
+                    id="uml-attrs"
+                    rows={3}
+                    value={(primary.attributes || []).join('\n')}
+                    onChange={(e) =>
+                      updateElementById(primary.id, {
+                        attributes: e.target.value.split('\n').filter((l) => l.length > 0),
+                      })
+                    }
+                    className="w-full rounded-lg border border-[#E2E8F0] px-2 py-1 text-[11px] font-mono-tabular"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="uml-methods" className="block text-[#475569] mb-1">
+                    Method (1 per baris)
+                  </label>
+                  <textarea
+                    id="uml-methods"
+                    rows={3}
+                    value={(primary.methods || []).join('\n')}
+                    onChange={(e) =>
+                      updateElementById(primary.id, {
+                        methods: e.target.value.split('\n').filter((l) => l.length > 0),
+                      })
+                    }
+                    className="w-full rounded-lg border border-[#E2E8F0] px-2 py-1 text-[11px] font-mono-tabular"
+                  />
+                </div>
+              </section>
+            )}
+
+            {/* Typography controls (works for single & multi-select) */}
+            {textElements.length > 0 && (
+              <section className="space-y-2.5 pt-2 border-t border-[#E2E8F0]">
+                <h3 className="font-semibold text-[#0F172A]">Teks & Tipografi</h3>
+
+                <div>
+                  <span className="block text-[#475569] mb-1">Jenis Font</span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      { id: 'sans', label: 'Sans' },
+                      { id: 'mono', label: 'Mono' },
+                      { id: 'sketch', label: 'Sketsa' },
+                    ].map((font) => (
+                      <button
+                        key={font.id}
+                        type="button"
+                        onClick={() =>
+                          updateSelectedElements((el) =>
+                            el.type !== 'freehand' ? { fontFamily: font.id } : null,
+                          )
+                        }
+                        className={`py-1.5 rounded-md border font-medium ${
+                          sharedFontFamily === font.id
+                            ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                            : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                        }`}
+                      >
+                        {font.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="block text-[#475569] mb-1">Ukuran Teks (px)</span>
+                  <div className="grid grid-cols-4 gap-1">
+                    {FONT_SIZE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() =>
+                          updateSelectedElements((el) =>
+                            el.type !== 'freehand' ? { fontSize: opt.value } : null,
+                          )
+                        }
+                        className={`py-1.5 rounded-md border font-mono-tabular font-medium ${
+                          sharedFontSize === opt.value
+                            ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                            : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Shared Visual Controls (works for single & multi-select / Select All) */}
+            <section className="space-y-2.5 pt-2 border-t border-[#E2E8F0]">
+              <h3 className="font-semibold text-[#0F172A]">Tampilan Visual</h3>
+
+              <div>
+                <span className="block text-[#475569] mb-1">Warna Garis / Teks</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {CANVAS_STROKE_SWATCHES.map((sw) => (
+                    <button
+                      key={sw.value}
+                      type="button"
+                      onClick={() => updateSelectedElements({ strokeColor: sw.value })}
+                      title={sw.label}
+                      aria-label={`Warna garis ${sw.label}`}
+                      className={`h-6 w-6 rounded-md border ${
+                        sharedStrokeColor === sw.value
+                          ? 'ring-2 ring-[#1D4ED8] ring-offset-1 border-[#0F172A]'
+                          : 'border-[#E2E8F0]'
+                      }`}
+                      style={{ backgroundColor: sw.value }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {fillableElements.length > 0 && (
+                <div>
+                  <span className="block text-[#475569] mb-1">
+                    Warna Isi{isMulti ? ` (${fillableElements.length})` : ''}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {CANVAS_FILL_SWATCHES.map((sw) => (
+                      <button
+                        key={sw.value}
+                        type="button"
+                        onClick={() =>
+                          updateSelectedElements((el) =>
+                            !NON_FILLABLE_TYPES.has(el.type) ? { fillColor: sw.value } : null,
+                          )
+                        }
+                        title={sw.label}
+                        aria-label={`Warna isi ${sw.label}`}
+                        className={`h-6 w-6 rounded-md border ${
+                          sharedFillColor === sw.value
+                            ? 'ring-2 ring-[#1D4ED8] ring-offset-1 border-[#0F172A]'
+                            : 'border-[#CBD5E1]'
+                        }`}
+                        style={{
+                          backgroundColor: sw.value === 'transparent' ? '#FFFFFF' : sw.value,
+                          backgroundImage:
+                            sw.value === 'transparent'
+                              ? 'linear-gradient(135deg, transparent 45%, #B91C1C 45%, #B91C1C 55%, transparent 55%)'
+                              : undefined,
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <span className="block text-[#475569] mb-1">Ketebalan Garis</span>
+                <div className="grid grid-cols-3 gap-1">
+                  {STROKE_WIDTH_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => updateSelectedElements({ strokeWidth: opt.value })}
+                      className={`py-1.5 rounded-md border font-medium ${
+                        sharedStrokeWidth === opt.value
+                          ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                          : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {styleLineElements.length > 0 && (
+                <div>
+                  <span className="block text-[#475569] mb-1">Pola Garis</span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      { id: 'solid', label: 'Solid' },
+                      { id: 'dashed', label: 'Putus' },
+                      { id: 'dotted', label: 'Titik' },
+                    ].map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() =>
+                          updateSelectedElements((el) =>
+                            el.type !== 'freehand' && el.type !== 'text'
+                              ? { strokeStyle: st.id }
+                              : null,
+                          )
+                        }
+                        className={`py-1.5 rounded-md border font-medium ${
+                          sharedStrokeStyle === st.id
+                            ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                            : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {renderableElements.length > 0 && (
+                <div>
+                  <span className="block text-[#475569] mb-1">Gaya Render (Komponen, Garis & Teks)</span>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedElements((el) =>
+                          el.type !== 'freehand' ? { roughness: 0, fontFamily: 'sans' } : null,
+                        )
+                      }
+                      className={`py-1.5 rounded-md border font-medium ${
+                        sharedRenderMode === 'clean'
+                          ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                          : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                      }`}
+                    >
+                      Teknis (Rapi)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedElements((el) =>
+                          el.type !== 'freehand' ? { roughness: 1.3, fontFamily: 'sketch' } : null,
+                        )
+                      }
+                      className={`py-1.5 rounded-md border font-medium ${
+                        sharedRenderMode === 'sketch'
+                          ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                          : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                      }`}
+                    >
+                      Sketsa Tangan
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <span className="block text-[#475569] mb-1">Opasitas</span>
+                <div className="grid grid-cols-4 gap-1">
+                  {OPACITY_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => updateSelectedElements({ opacity: opt.value })}
+                      className={`py-1.5 rounded-md border font-mono-tabular font-medium ${
+                        sharedOpacity === opt.value
+                          ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                          : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* Layer order (works for single & multi-select) */}
+            <section className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+              <h3 className="font-semibold text-[#0F172A]">Urutan Lapisan</h3>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => reorderSelected('front')}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-[#E2E8F0] py-1.5 text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A]"
+                >
+                  <ArrowUpToLine className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  <span>Ke Depan</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => reorderSelected('back')}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-[#E2E8F0] py-1.5 text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A]"
+                >
+                  <ArrowDownToLine className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  <span>Ke Belakang</span>
+                </button>
+              </div>
+            </section>
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
