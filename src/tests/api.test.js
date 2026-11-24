@@ -7,18 +7,18 @@ import { createApp } from '../../server/app.js';
 const CSRF = { 'X-Requested-With': 'FlowBoard' };
 
 describe('Auth & Boards API (Happy path, validation, & anti-IDOR security)', () => {
-  /** @type {import('node:sqlite').DatabaseSync} */
+  /** @type {import('../../server/db.js').FlowBoardDb} */
   let db;
   /** @type {import('express').Express} */
   let app;
 
-  beforeEach(() => {
-    db = createDatabase(':memory:');
+  beforeEach(async () => {
+    db = await createDatabase(':memory:');
     app = createApp({ db, enableRateLimit: false });
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await db.close();
   });
 
   it('registers, authenticates, persists boards, and revokes session on logout', async () => {

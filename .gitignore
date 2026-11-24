@@ -4,6 +4,7 @@ node_modules/
 # Build & caches
 dist/
 .vite/
+.vercel/
 *.tsbuildinfo
 coverage/
 

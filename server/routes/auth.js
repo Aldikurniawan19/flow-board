@@ -15,11 +15,12 @@ const DEFAULT_BOARD_SETTINGS = JSON.stringify({
   renderMode: 'clean',
   gridMode: 'dots',
   snapToGrid: true,
+  autoCorrectShapes: true,
 });
 
 /**
  * Create authentication router (/api/auth/*).
- * @param {import('node:sqlite').DatabaseSync} db
+ * @param {import('../db.js').FlowBoardDb} db
  * @param {{ enableRateLimit?: boolean }} [options]
  */
 export function createAuthRouter(db, options = {}) {
@@ -41,7 +42,7 @@ export function createAuthRouter(db, options = {}) {
       }
 
       const { name, email, password } = parsed.data;
-      const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+      const existing = await db.get('SELECT id FROM users WHERE email = ?', [email]);
       if (existing) {
         return res.status(409).json({
           error: 'Email sudah terdaftar. Silakan masuk atau gunakan email lain.',
@@ -52,17 +53,19 @@ export function createAuthRouter(db, options = {}) {
       const passwordHash = await bcrypt.hash(password, 10);
       const now = new Date().toISOString();
 
-      db.prepare(
+      await db.run(
         'INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
-      ).run(userId, name, email, passwordHash, now);
+        [userId, name, email, passwordHash, now],
+      );
 
       const firstBoardId = crypto.randomUUID();
-      db.prepare(
+      await db.run(
         `INSERT INTO boards (id, user_id, title, settings_json, elements_json, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(firstBoardId, userId, 'Papan Kerja Pertama', DEFAULT_BOARD_SETTINGS, '[]', now, now);
+        [firstBoardId, userId, 'Papan Kerja Pertama', DEFAULT_BOARD_SETTINGS, '[]', now, now],
+      );
 
-      const token = createSession(db, userId);
+      const token = await createSession(db, userId);
       res.cookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions());
 
       return res.status(201).json({
@@ -84,9 +87,10 @@ export function createAuthRouter(db, options = {}) {
 
       const { email, password } = parsed.data;
       const user = /** @type {{ id: string, name: string, email: string, password_hash: string } | undefined} */ (
-        db
-          .prepare('SELECT id, name, email, password_hash FROM users WHERE email = ?')
-          .get(email)
+        await db.get(
+          'SELECT id, name, email, password_hash FROM users WHERE email = ?',
+          [email],
+        )
       );
 
       if (!user) {
@@ -98,7 +102,7 @@ export function createAuthRouter(db, options = {}) {
         return res.status(401).json({ error: 'Email atau kata sandi salah.' });
       }
 
-      const token = createSession(db, user.id);
+      const token = await createSession(db, user.id);
       res.cookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions());
 
       return res.status(200).json({
@@ -109,13 +113,17 @@ export function createAuthRouter(db, options = {}) {
     }
   });
 
-  router.post('/logout', (req, res) => {
-    const rawToken = req.cookies?.[SESSION_COOKIE_NAME];
-    if (rawToken && typeof rawToken === 'string') {
-      deleteSession(db, rawToken);
+  router.post('/logout', async (req, res, next) => {
+    try {
+      const rawToken = req.cookies?.[SESSION_COOKIE_NAME];
+      if (rawToken && typeof rawToken === 'string') {
+        await deleteSession(db, rawToken);
+      }
+      res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      return next(err);
     }
-    res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
-    return res.status(200).json({ ok: true });
   });
 
   router.get('/me', requireAuth, (req, res) => {

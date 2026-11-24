@@ -31,7 +31,7 @@ function safeParseJson(raw, fallback) {
 }
 
 /**
- * Map SQLite board row to API DTO.
+ * Map database board row to API DTO.
  * @param {{ id: string, title: string, settings_json: string, elements_json: string, created_at: string, updated_at: string }} row
  */
 function serializeBoard(row) {
@@ -49,7 +49,7 @@ function serializeBoard(row) {
 
 /**
  * Create boards router (/api/boards/*) with strict ownership checks.
- * @param {import('node:sqlite').DatabaseSync} db
+ * @param {import('../db.js').FlowBoardDb} db
  */
 export function createBoardsRouter(db) {
   const router = express.Router();
@@ -57,158 +57,177 @@ export function createBoardsRouter(db) {
 
   router.use(requireAuth);
 
-  router.get('/', (req, res) => {
-    const user = req.user;
-    if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
+  router.get('/', async (req, res, next) => {
+    try {
+      const user = req.user;
+      if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
 
-    const rows = /** @type {Array<{ id: string, title: string, created_at: string, updated_at: string }>} */ (
-      db
-        .prepare(
+      const rows = /** @type {Array<{ id: string, title: string, created_at: string, updated_at: string }>} */ (
+        await db.all(
           `SELECT id, title, created_at, updated_at
            FROM boards
            WHERE user_id = ?
            ORDER BY updated_at DESC
            LIMIT 100`,
+          [user.id],
         )
-        .all(user.id)
-    );
+      );
 
-    return res.status(200).json({
-      boards: rows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      })),
-    });
-  });
-
-  router.post('/', (req, res) => {
-    const user = req.user;
-    if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
-
-    const parsed = CreateBoardSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: parsed.error.issues[0]?.message || 'Data papan kerja tidak valid.',
+      return res.status(200).json({
+        boards: rows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        })),
       });
+    } catch (err) {
+      return next(err);
     }
-
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const title = parsed.data.title;
-    const settings = parsed.data.settings || DEFAULT_SETTINGS;
-    const elements = parsed.data.elements || [];
-
-    db.prepare(
-      `INSERT INTO boards (id, user_id, title, settings_json, elements_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, user.id, title, JSON.stringify(settings), JSON.stringify(elements), now, now);
-
-    return res.status(201).json({
-      board: {
-        id,
-        title,
-        settings,
-        elements,
-        createdAt: now,
-        updatedAt: now,
-      },
-    });
   });
 
-  router.get('/:id', (req, res) => {
-    const user = req.user;
-    if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
+  router.post('/', async (req, res, next) => {
+    try {
+      const user = req.user;
+      if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
 
-    const row = /** @type {{ id: string, user_id: string, title: string, settings_json: string, elements_json: string, created_at: string, updated_at: string } | undefined} */ (
-      db
-        .prepare(
+      const parsed = CreateBoardSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: parsed.error.issues[0]?.message || 'Data papan kerja tidak valid.',
+        });
+      }
+
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const title = parsed.data.title;
+      const settings = parsed.data.settings || DEFAULT_SETTINGS;
+      const elements = parsed.data.elements || [];
+
+      await db.run(
+        `INSERT INTO boards (id, user_id, title, settings_json, elements_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, user.id, title, JSON.stringify(settings), JSON.stringify(elements), now, now],
+      );
+
+      return res.status(201).json({
+        board: {
+          id,
+          title,
+          settings,
+          elements,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  router.get('/:id', async (req, res, next) => {
+    try {
+      const user = req.user;
+      if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
+
+      const row = /** @type {{ id: string, user_id: string, title: string, settings_json: string, elements_json: string, created_at: string, updated_at: string } | undefined} */ (
+        await db.get(
           'SELECT id, user_id, title, settings_json, elements_json, created_at, updated_at FROM boards WHERE id = ?',
+          [req.params.id],
         )
-        .get(req.params.id)
-    );
+      );
 
-    if (!row) {
-      return res.status(404).json({ error: 'Papan kerja tidak ditemukan.' });
-    }
-    if (row.user_id !== user.id) {
-      return res.status(403).json({ error: 'Anda tidak memiliki akses ke papan kerja ini.' });
-    }
+      if (!row) {
+        return res.status(404).json({ error: 'Papan kerja tidak ditemukan.' });
+      }
+      if (row.user_id !== user.id) {
+        return res.status(403).json({ error: 'Anda tidak memiliki akses ke papan kerja ini.' });
+      }
 
-    return res.status(200).json({ board: serializeBoard(row) });
+      return res.status(200).json({ board: serializeBoard(row) });
+    } catch (err) {
+      return next(err);
+    }
   });
 
-  router.put('/:id', (req, res) => {
-    const user = req.user;
-    if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
+  router.put('/:id', async (req, res, next) => {
+    try {
+      const user = req.user;
+      if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
 
-    const parsed = UpdateBoardSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: parsed.error.issues[0]?.message || 'Perubahan papan kerja tidak valid.',
-      });
-    }
+      const parsed = UpdateBoardSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: parsed.error.issues[0]?.message || 'Perubahan papan kerja tidak valid.',
+        });
+      }
 
-    const existing = /** @type {{ id: string, user_id: string, title: string, settings_json: string, elements_json: string, created_at: string } | undefined} */ (
-      db
-        .prepare(
+      const existing = /** @type {{ id: string, user_id: string, title: string, settings_json: string, elements_json: string, created_at: string } | undefined} */ (
+        await db.get(
           'SELECT id, user_id, title, settings_json, elements_json, created_at FROM boards WHERE id = ?',
+          [req.params.id],
         )
-        .get(req.params.id)
-    );
+      );
 
-    if (!existing) {
-      return res.status(404).json({ error: 'Papan kerja tidak ditemukan.' });
+      if (!existing) {
+        return res.status(404).json({ error: 'Papan kerja tidak ditemukan.' });
+      }
+      if (existing.user_id !== user.id) {
+        return res.status(403).json({ error: 'Anda tidak memiliki izin mengubah papan kerja ini.' });
+      }
+
+      const nextTitle = parsed.data.title ?? existing.title;
+      const nextSettingsJson = parsed.data.settings
+        ? JSON.stringify(parsed.data.settings)
+        : existing.settings_json;
+      const nextElementsJson = parsed.data.elements
+        ? JSON.stringify(parsed.data.elements)
+        : existing.elements_json;
+      const updatedAt = new Date().toISOString();
+
+      await db.run(
+        `UPDATE boards
+         SET title = ?, settings_json = ?, elements_json = ?, updated_at = ?
+         WHERE id = ? AND user_id = ?`,
+        [nextTitle, nextSettingsJson, nextElementsJson, updatedAt, existing.id, user.id],
+      );
+
+      return res.status(200).json({
+        board: serializeBoard({
+          id: existing.id,
+          title: nextTitle,
+          settings_json: nextSettingsJson,
+          elements_json: nextElementsJson,
+          created_at: existing.created_at,
+          updated_at: updatedAt,
+        }),
+      });
+    } catch (err) {
+      return next(err);
     }
-    if (existing.user_id !== user.id) {
-      return res.status(403).json({ error: 'Anda tidak memiliki izin mengubah papan kerja ini.' });
-    }
-
-    const nextTitle = parsed.data.title ?? existing.title;
-    const nextSettingsJson = parsed.data.settings
-      ? JSON.stringify(parsed.data.settings)
-      : existing.settings_json;
-    const nextElementsJson = parsed.data.elements
-      ? JSON.stringify(parsed.data.elements)
-      : existing.elements_json;
-    const updatedAt = new Date().toISOString();
-
-    db.prepare(
-      `UPDATE boards
-       SET title = ?, settings_json = ?, elements_json = ?, updated_at = ?
-       WHERE id = ? AND user_id = ?`,
-    ).run(nextTitle, nextSettingsJson, nextElementsJson, updatedAt, existing.id, user.id);
-
-    return res.status(200).json({
-      board: serializeBoard({
-        id: existing.id,
-        title: nextTitle,
-        settings_json: nextSettingsJson,
-        elements_json: nextElementsJson,
-        created_at: existing.created_at,
-        updated_at: updatedAt,
-      }),
-    });
   });
 
-  router.delete('/:id', (req, res) => {
-    const user = req.user;
-    if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
+  router.delete('/:id', async (req, res, next) => {
+    try {
+      const user = req.user;
+      if (!user) return res.status(401).json({ error: 'Autentikasi diperlukan.' });
 
-    const existing = /** @type {{ id: string, user_id: string } | undefined} */ (
-      db.prepare('SELECT id, user_id FROM boards WHERE id = ?').get(req.params.id)
-    );
+      const existing = /** @type {{ id: string, user_id: string } | undefined} */ (
+        await db.get('SELECT id, user_id FROM boards WHERE id = ?', [req.params.id])
+      );
 
-    if (!existing) {
-      return res.status(404).json({ error: 'Papan kerja tidak ditemukan.' });
+      if (!existing) {
+        return res.status(404).json({ error: 'Papan kerja tidak ditemukan.' });
+      }
+      if (existing.user_id !== user.id) {
+        return res.status(403).json({ error: 'Anda tidak memiliki izin menghapus papan kerja ini.' });
+      }
+
+      await db.run('DELETE FROM boards WHERE id = ? AND user_id = ?', [existing.id, user.id]);
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      return next(err);
     }
-    if (existing.user_id !== user.id) {
-      return res.status(403).json({ error: 'Anda tidak memiliki izin menghapus papan kerja ini.' });
-    }
-
-    db.prepare('DELETE FROM boards WHERE id = ? AND user_id = ?').run(existing.id, user.id);
-    return res.status(200).json({ ok: true });
   });
 
   return router;

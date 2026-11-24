@@ -8,30 +8,38 @@ import { applySecurityHeaders, requireCsrfHeader } from './middleware/security.j
 
 /**
  * Create configured Express application.
- * @param {{ db: import('node:sqlite').DatabaseSync, enableRateLimit?: boolean }} options
+ * @param {{ db: import('./db.js').FlowBoardDb, enableRateLimit?: boolean, serveStatic?: boolean }} options
  */
-export function createApp({ db, enableRateLimit = true }) {
+export function createApp({ db, enableRateLimit = true, serveStatic = true }) {
   const app = express();
 
+  app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(applySecurityHeaders);
   app.use(cookieParser());
   app.use(express.json({ limit: '6mb' }));
 
-  app.get('/api/health', (_req, res) => {
-    res.status(200).json({ status: 'ok' });
+  app.get('/api/health', async (_req, res, next) => {
+    try {
+      await db.init();
+      res.status(200).json({ status: 'ok', database: db.dialect });
+    } catch (err) {
+      next(err);
+    }
   });
 
   app.use('/api', requireCsrfHeader);
   app.use('/api/auth', createAuthRouter(db, { enableRateLimit }));
   app.use('/api/boards', createBoardsRouter(db));
 
-  const distDir = path.resolve(process.cwd(), 'dist');
-  if (fs.existsSync(distDir)) {
-    app.use(express.static(distDir));
-    app.get(/^(?!\/api\/).*/, (_req, res) => {
-      res.sendFile(path.join(distDir, 'index.html'));
-    });
+  if (serveStatic) {
+    const distDir = path.resolve(process.cwd(), 'dist');
+    if (fs.existsSync(distDir)) {
+      app.use(express.static(distDir));
+      app.get(/^(?!\/api\/).*/, (_req, res) => {
+        res.sendFile(path.join(distDir, 'index.html'));
+      });
+    }
   }
 
   app.use((err, _req, res, _next) => {

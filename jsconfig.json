@@ -15,6 +15,6 @@
     "noImplicitReturns": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/types/env.d.ts", "src/**/*.js", "src/**/*.jsx", "server/**/*.js"],
+  "include": ["src/types/env.d.ts", "src/**/*.js", "src/**/*.jsx", "server/**/*.js", "api/**/*.js"],
   "exclude": ["node_modules", "dist", "data"]
 }

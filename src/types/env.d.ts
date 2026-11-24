@@ -6,9 +6,11 @@ declare var process: {
 declare module 'node:fs' {
   export function existsSync(p: string): boolean;
   export function mkdirSync(p: string, options?: { recursive?: boolean }): void;
+  export function readFileSync(p: string, encoding: string): string;
   const fsDefault: {
     existsSync: typeof existsSync;
     mkdirSync: typeof mkdirSync;
+    readFileSync: typeof readFileSync;
   };
   export default fsDefault;
 }
@@ -90,6 +92,8 @@ declare module 'express' {
     delete(path: string | RegExp, ...handlers: RequestHandler[]): Router;
   }
   export interface Express extends Router {
+    (req: unknown, res: unknown): unknown;
+    set(setting: string, val: unknown): void;
     disable(setting: string): void;
     listen(port: number, host: string, cb?: () => void): unknown;
   }
@@ -105,6 +109,25 @@ declare module 'express' {
 declare module 'cookie-parser' {
   import type { RequestHandler } from 'express';
   export default function cookieParser(): RequestHandler;
+}
+
+declare module 'pg' {
+  export interface QueryResult<T = Record<string, any>> {
+    rows: T[];
+    rowCount: number | null;
+  }
+  export interface PoolConfig {
+    connectionString?: string;
+    ssl?: boolean | { rejectUnauthorized?: boolean };
+    max?: number;
+    idleTimeoutMillis?: number;
+    connectionTimeoutMillis?: number;
+  }
+  export class Pool {
+    constructor(config?: PoolConfig);
+    query<T = Record<string, any>>(text: string, values?: unknown[]): Promise<QueryResult<T>>;
+    end(): Promise<void>;
+  }
 }
 
 declare module 'supertest' {
