@@ -603,14 +603,12 @@ export function drawConnectorLabel(ctx, el, elementsById, isChalkboard = false) 
     ctx.fill();
     ctx.restore();
   } else {
-    ctx.fillStyle = '#FFFFFF';
-    ctx.strokeStyle = '#E2E8F0';
-    ctx.lineWidth = 1;
+    // Report-clean white knockout mask (Draw.io/Visio style, crisp text without cluttered box borders)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
     ctx.beginPath();
-    ctx.roundRect?.(bx, by, boxW, boxH, 4);
+    ctx.roundRect?.(bx, by, boxW, boxH, 3);
     if (!ctx.roundRect) ctx.rect(bx, by, boxW, boxH);
     ctx.fill();
-    ctx.stroke();
   }
 
   ctx.fillStyle = isChalkboard ? '#F3F5F0' : '#0F172A';

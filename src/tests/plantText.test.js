@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ElementSchema } from '../types/schema.js';
+import { orthoSegmentHitsRect } from '../engine/autoLayout.js';
+import { getNormalizedRect, isConnectableElement } from '../engine/ports.js';
+import { computeConnectorPath } from '../engine/router.js';
 import {
   MAX_PLANTTEXT_CHARS,
   PLANTTEXT_EXAMPLES,
@@ -279,6 +282,118 @@ P7 <-[#2E7D32]- D7 : Rekap Insiden\\n& Klaim
         expect(pt.x, `Connector "${c.text}" must not detour behind Data Stores`).toBeLessThanOrEqual(
           maxStoreRight + 2,
         );
+      }
+    }
+
+    for (const el of res.elements) {
+      expect(ElementSchema.safeParse(el).success).toBe(true);
+    }
+  });
+
+  it('lays out multi-axis directional DFD into a compact report-ready 2D hub grid with skinparam colors', () => {
+    const rentalDfd = `@startuml
+title DFD Level 1 - Sistem Penyewaan Kendaraan
+top to bottom direction
+skinparam rectangle<<External>> {
+  BackgroundColor #F5F5F5
+  BorderColor #666666
+}
+skinparam usecase<<Process>> {
+  BackgroundColor #F5F5F5
+  BorderColor #666666
+}
+skinparam rectangle<<DataStore>> {
+  BackgroundColor #FFFFFF
+  BorderColor #FFFFFF
+}
+rectangle "Pelanggan" as Pelanggan <<External>>
+rectangle "Sopir" as Sopir <<External>>
+rectangle "Pimpinan" as Pimpinan <<External>>
+usecase "1.0\\nRegistrasi &\\nkelola akun" as P1 <<Process>>
+usecase "2.0\\nPemesanan\\nKendaraan" as P2 <<Process>>
+usecase "3.0\\nVerifikasi &\\nValidasi\\nPesanan" as P3 <<Process>>
+usecase "4.0\\nPelepasan\\nKendaraan" as P4 <<Process>>
+usecase "5.0\\nPengembalian\\n& Kelola\\nDenda" as P5 <<Process>>
+usecase "6.0\\nPengelolaan\\nlaporan" as P6 <<Process>>
+rectangle "----\\nData pelanggan\\n----" as DP <<DataStore>>
+rectangle "----\\nData Kendaraan\\n----" as DK1 <<DataStore>>
+rectangle "----\\nData Transaksi\\n----" as DT <<DataStore>>
+rectangle "----\\nData Sopir\\n----" as DS <<DataStore>>
+rectangle "----\\nData Kendaraan\\n----" as DK2 <<DataStore>>
+
+Pelanggan -right-> P1 : Data registrasi akun
+P1 -left-> Pelanggan : Informasi akun berhasil di buat
+P1 -right-> DP : Simpan data pelanggan
+Pelanggan -down-> P2 : Data pemesanan Kendaraan
+P2 -up-> Pelanggan : Info ketersediaan kendaraan
+P2 -left-> DK1 : Cek ketersediaan kendaraan
+P2 -down-> DT : Simpan data pemesanan
+DT -up-> P3 : Ambil data transaksi pending
+P3 -down-> DT : Update status transaksi dikonfirmasi
+P3 -up-> Pelanggan : Konfirmasi pesanan & Kwitansi
+DT -up-> Pelanggan : History penyewaan
+DT -left-> P4 : Ambil data transaksi dikonfirmasi
+P4 -right-> DT : Update transaksi berjalan & kondisi awal
+P4 -up-> DK1 : Update status kendaraan tidak tersedia
+P4 -down-> Sopir : Info jadwal penugasan
+DT -right-> P5 : Ambil data transaksi berjalan
+P5 -left-> DT : Update transaksi selesai & hitung denda
+P5 -down-> DS : Update status sopir tersedia
+P5 -down-> DK2 : Update status mobil tersedia
+DT -down-> P6 : Ambil data transaksi lengkap
+P6 -right-> Pimpinan : Rekap laporan operasional
+@enduml`;
+
+    const res = parsePlantText(rentalDfd);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    expect(res.kind).toBe('dfd');
+    expect(res.kindLabel).toBe('DFD (Yourdon & DeMarco)');
+
+    const byText = (sub) => res.elements.find((e) => e.type !== 'connector' && (e.text || '').includes(sub));
+    const pelanggan = byText('Pelanggan');
+    const p1 = byText('Registrasi');
+    const p4 = byText('Pelepasan');
+    const p5 = byText('Pengembalian');
+    const p6 = byText('Pengelolaan');
+    const dt = byText('Data Transaksi');
+    const dp = byText('Data pelanggan');
+
+    expect(pelanggan?.fillColor).toBe('#F5F5F5');
+    expect(pelanggan?.strokeColor).toBe('#666666');
+    // No fabricated D1/D2 prefix when user did not write one
+    expect(dp?.text).toBe('Data pelanggan');
+    // Hub-anchored 2D spatial grid: P4 left of DT, P5 right of DT, P6 below DT, Pelanggan left of P1
+    expect((p4?.x || 0) < (dt?.x || 0)).toBe(true);
+    expect((p5?.x || 0) > (dt?.x || 0)).toBe(true);
+    expect((p6?.y || 0) > (dt?.y || 0)).toBe(true);
+    expect((pelanggan?.x || 0) < (p1?.x || 0)).toBe(true);
+
+    // Ironclad check: NO connector interior segment may cut through ANY node (including its own src or dst!)
+    // and every connector must enter its target strictly from OUTSIDE its bound side.
+    const byId = new Map(res.elements.map((e) => [e.id, e]));
+    const allNodes = res.elements.filter((e) => isConnectableElement(e));
+    const allConns = res.elements.filter((e) => e.type === 'connector');
+    for (const conn of allConns) {
+      const pts = computeConnectorPath(conn, byId).points;
+      for (let i = 1; i < pts.length - 2; i += 1) {
+        for (const node of allNodes) {
+          expect(
+            orthoSegmentHitsRect(pts[i], pts[i + 1], getNormalizedRect(node)),
+            `Interior segment of "${conn.text}" must never cut through "${node.text}"`,
+          ).toBe(false);
+        }
+      }
+      // Verify last approach segment enters target from OUTSIDE (never from inside the shape!)
+      const dst = conn.endBinding ? byId.get(conn.endBinding.elementId) : null;
+      if (dst && conn.endBinding && pts.length >= 2) {
+        const penult = pts[pts.length - 2];
+        const last = pts[pts.length - 1];
+        if (conn.endBinding.side === 'top') expect(penult.y).toBeLessThanOrEqual(last.y + 0.5);
+        if (conn.endBinding.side === 'bottom') expect(penult.y).toBeGreaterThanOrEqual(last.y - 0.5);
+        if (conn.endBinding.side === 'left') expect(penult.x).toBeLessThanOrEqual(last.x + 0.5);
+        if (conn.endBinding.side === 'right') expect(penult.x).toBeGreaterThanOrEqual(last.x - 0.5);
       }
     }
 

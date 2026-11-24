@@ -211,16 +211,300 @@ function assignSemanticDfdPositions(nodes, connectors) {
 }
 
 /**
+ * Hub-Anchored 2D Directional Grid Layout for report-ready diagrams whose PlantUML source
+ * specifies explicit multi-axis spatial directions (`-up->`, `-down->`, `-left->`, `-right->`).
+ * Anchors the highest-degree central hub (e.g. Data Transaksi) at (0,0) and places surrounding
+ * processes, entities, and data stores cleanly on a balanced 2D report grid to minimize crossings.
+ *
+ * @param {import('../types/schema.js').BoardElement[]} nodes
+ * @param {import('../types/schema.js').BoardElement[]} connectors
+ * @param {Map<string, 'up' | 'down' | 'left' | 'right'>} dirHints
+ */
+function assignDirectionalGridPositions(nodes, connectors, dirHints) {
+  if (nodes.length === 0) return;
+
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const nodeOrder = new Map(nodes.map((n, idx) => [n.id, idx]));
+
+  /** @type {Map<string, Array<{ neighbor: string, dx: number, dy: number, hasHint: boolean }>>} */
+  const adj = new Map(nodes.map((n) => [n.id, []]));
+  /** @type {Map<string, number>} */
+  const degree = new Map(nodes.map((n) => [n.id, 0]));
+
+  const dirToVec = {
+    right: { dx: 1, dy: 0 },
+    left: { dx: -1, dy: 0 },
+    down: { dx: 0, dy: 1 },
+    up: { dx: 0, dy: -1 },
+  };
+
+  for (const c of connectors) {
+    const s = c.startBinding?.elementId;
+    const t = c.endBinding?.elementId;
+    if (!s || !t || s === t || !nodeIds.has(s) || !nodeIds.has(t)) continue;
+    degree.set(s, (degree.get(s) || 0) + 1);
+    degree.set(t, (degree.get(t) || 0) + 1);
+    const hint = dirHints.get(c.id);
+    if (hint) {
+      const v = dirToVec[hint];
+      adj.get(s)?.push({ neighbor: t, dx: v.dx, dy: v.dy, hasHint: true });
+      adj.get(t)?.push({ neighbor: s, dx: -v.dx, dy: -v.dy, hasHint: true });
+    } else {
+      adj.get(s)?.push({ neighbor: t, dx: 1, dy: 0, hasHint: false });
+      adj.get(t)?.push({ neighbor: s, dx: -1, dy: 0, hasHint: false });
+    }
+  }
+
+  // Anchor highest-degree central hub at (0, 0) so all connected processes radiate around it
+  let hubId = nodes[0].id;
+  let maxDeg = -1;
+  for (const n of nodes) {
+    const d = degree.get(n.id) || 0;
+    if (d > maxDeg) {
+      maxDeg = d;
+      hubId = n.id;
+    }
+  }
+
+  /** @type {Map<string, { gx: number, gy: number }>} */
+  const placed = new Map();
+  /** @type {Set<string>} */
+  const occupied = new Set();
+  const cellKey = (gx, gy) => `${gx},${gy}`;
+
+  placed.set(hubId, { gx: 0, gy: 0 });
+  occupied.add(cellKey(0, 0));
+
+  /**
+   * Pick the nearest free integer grid cell to ideal floating coordinate (tx, ty),
+   * preferring direct neighbor cells and compact horizontal span [-1, +1].
+   * @param {number} tx
+   * @param {number} ty
+   * @param {boolean} preferDown
+   */
+  function findFreeCell(tx, ty, preferDown) {
+    const baseGx = Math.round(tx);
+    const baseGy = Math.round(ty);
+    let best = { gx: baseGx, gy: baseGy };
+    let bestCost = Infinity;
+
+    for (let rad = 0; rad <= 5; rad += 1) {
+      for (let dy = -rad; dy <= rad; dy += 1) {
+        for (let dx = rad; dx >= -rad; dx -= 1) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== rad) continue;
+          const gx = baseGx + dx;
+          const gy = baseGy + dy;
+          if (occupied.has(cellKey(gx, gy))) continue;
+          if (preferDown && gy < baseGy) continue;
+          const dist = Math.hypot(gx - tx, gy - ty);
+          const widePen = Math.abs(gx) > 1 ? Math.abs(gx) * 0.45 : 0;
+          // Prefer left-to-right reading flow (positive dx) on exact distance ties
+          const flowBias = dx > 0 ? -0.02 : 0;
+          const cost = dist + widePen + flowBias;
+          if (cost < bestCost) {
+            bestCost = cost;
+            best = { gx, gy };
+          }
+        }
+      }
+      if (bestCost < Infinity) return best;
+    }
+    return best;
+  }
+
+  const isProcessNode = (id) => {
+    const n = nodes.find((item) => item.id === id);
+    return Boolean(n && (n.type === 'dfd_yd_process' || n.type === 'dfd_gs_process'));
+  };
+
+  // Iteratively place the most constrained unplaced neighbor of already-placed nodes
+  while (placed.size < nodes.length) {
+    /** @type {Array<{ id: string, placedNeighbors: number, hintedNeighbors: number, isProc: number, order: number }>} */
+    const frontier = [];
+    for (const n of nodes) {
+      if (placed.has(n.id)) continue;
+      const edges = adj.get(n.id) || [];
+      let pCount = 0;
+      let hCount = 0;
+      /** @type {Set<string>} */
+      const seenNeighbors = new Set();
+      for (const e of edges) {
+        if (placed.has(e.neighbor) && !seenNeighbors.has(e.neighbor)) {
+          seenNeighbors.add(e.neighbor);
+          pCount += 1;
+          if (e.hasHint) hCount += 1;
+        }
+      }
+      if (pCount > 0) {
+        frontier.push({
+          id: n.id,
+          placedNeighbors: pCount,
+          hintedNeighbors: hCount,
+          isProc: isProcessNode(n.id) ? 1 : 0,
+          order: nodeOrder.get(n.id) || 0,
+        });
+      }
+    }
+
+    if (frontier.length === 0) {
+      // Disconnected node: place at next available row
+      const unplaced = nodes.find((n) => !placed.has(n.id));
+      if (!unplaced) break;
+      const cell = findFreeCell(0, 2, false);
+      placed.set(unplaced.id, cell);
+      occupied.add(cellKey(cell.gx, cell.gy));
+      continue;
+    }
+
+    // Prioritize multi-constrained nodes first, then core Processes around the hub before outer Entities/Stores
+    frontier.sort((a, b) => {
+      if (b.hintedNeighbors !== a.hintedNeighbors) return b.hintedNeighbors - a.hintedNeighbors;
+      if (b.placedNeighbors !== a.placedNeighbors) return b.placedNeighbors - a.placedNeighbors;
+      if (b.isProc !== a.isProc) return b.isProc - a.isProc;
+      return a.order - b.order;
+    });
+
+    const nextId = frontier[0].id;
+    const edges = adj.get(nextId) || [];
+    let sumX = 0;
+    let sumY = 0;
+    let weightSum = 0;
+    let preferDown = false;
+
+    for (const e of edges) {
+      const pPos = placed.get(e.neighbor);
+      if (!pPos) continue;
+      // From placed neighbor -> nextId, desired vector is (-e.dx, -e.dy)
+      const w = e.hasHint ? 2 : 0.5;
+      sumX += (pPos.gx - e.dx) * w;
+      sumY += (pPos.gy - e.dy) * w;
+      weightSum += w;
+      if (e.hasHint && -e.dy > 0) preferDown = true;
+    }
+
+    const tx = weightSum > 0 ? sumX / weightSum : 0;
+    const ty = weightSum > 0 ? sumY / weightSum : 0;
+    const cell = findFreeCell(tx, ty, preferDown);
+    placed.set(nextId, cell);
+    occupied.add(cellKey(cell.gx, cell.gy));
+  }
+
+  // Row-centering polish: if top or bottom row is shifted +1/-1 relative to core columns [-1..1], align it cleanly
+  /** @type {Map<number, string[]>} */
+  const byRow = new Map();
+  for (const [id, pos] of placed.entries()) {
+    if (!byRow.has(pos.gy)) byRow.set(pos.gy, []);
+    byRow.get(pos.gy)?.push(id);
+  }
+  const allGxs = Array.from(placed.values()).map((p) => p.gx);
+  const coreMinX = Math.min(...allGxs);
+  const coreMaxX = Math.max(...allGxs);
+  if (coreMaxX - coreMinX >= 3) {
+    for (const ids of byRow.values()) {
+      const rxs = ids.map((id) => placed.get(id)?.gx || 0);
+      const rMin = Math.min(...rxs);
+      const rMax = Math.max(...rxs);
+      if (rMax === coreMaxX && rMin > coreMinX) {
+        const canShiftLeft = ids.every((id) => {
+          const p = placed.get(id);
+          if (!p) return false;
+          const targetKey = cellKey(p.gx - 1, p.gy);
+          return !occupied.has(targetKey) || ids.some((oid) => {
+            const op = placed.get(oid);
+            return op && op.gx === p.gx - 1 && op.gy === p.gy;
+          });
+        });
+        if (canShiftLeft) {
+          for (const id of ids) {
+            const p = placed.get(id);
+            if (p) occupied.delete(cellKey(p.gx, p.gy));
+          }
+          for (const id of ids) {
+            const p = placed.get(id);
+            if (p) {
+              p.gx -= 1;
+              occupied.add(cellKey(p.gx, p.gy));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Normalize grid coordinates to start at (0, 0) and convert to balanced pixel coordinates
+  let minGx = Infinity;
+  let maxGx = -Infinity;
+  let minGy = Infinity;
+  let maxGy = -Infinity;
+  for (const p of placed.values()) {
+    if (p.gx < minGx) minGx = p.gx;
+    if (p.gx > maxGx) maxGx = p.gx;
+    if (p.gy < minGy) minGy = p.gy;
+    if (p.gy > maxGy) maxGy = p.gy;
+  }
+
+  const numCols = maxGx - minGx + 1;
+  const numRows = maxGy - minGy + 1;
+  const colWidths = Array.from({ length: numCols }, () => 136);
+  const rowHeights = Array.from({ length: numRows }, () => 76);
+
+  for (const n of nodes) {
+    const p = placed.get(n.id);
+    if (!p) continue;
+    const c = p.gx - minGx;
+    const r = p.gy - minGy;
+    colWidths[c] = Math.max(colWidths[c], n.width);
+    rowHeights[r] = Math.max(rowHeights[r], n.height);
+  }
+
+  const colGap = 205;
+  const rowGap = 128;
+  const originX = 110;
+  const originY = 110;
+
+  /** @type {number[]} */
+  const colLefts = [];
+  let cx = originX;
+  for (let c = 0; c < numCols; c += 1) {
+    colLefts.push(cx);
+    cx += colWidths[c] + colGap;
+  }
+
+  /** @type {number[]} */
+  const rowTops = [];
+  let cy = originY;
+  for (let r = 0; r < numRows; r += 1) {
+    rowTops.push(cy);
+    cy += rowHeights[r] + rowGap;
+  }
+
+  for (const n of nodes) {
+    const p = placed.get(n.id);
+    if (!p) continue;
+    const c = p.gx - minGx;
+    const r = p.gy - minGy;
+    n.x = Math.round(colLefts[c] + (colWidths[c] - n.width) / 2);
+    n.y = Math.round(rowTops[r] + (rowHeights[r] - n.height) / 2);
+  }
+}
+
+/**
  * Stage 1: Sugiyama Layered Node Layout (Cycle removal, Longest-Path ranks,
  * Barycenter crossing minimization, and non-overlapping coordinate assignment).
  * @param {import('../types/schema.js').BoardElement[]} nodes
  * @param {import('../types/schema.js').BoardElement[]} connectors
- * @param {{ direction?: 'LR' | 'TB', kind?: string }} opts
+ * @param {{ direction?: 'LR' | 'TB', kind?: string, dirHints?: Map<string, 'up' | 'down' | 'left' | 'right'> }} opts
  */
 function assignSugiyamaPositions(nodes, connectors, opts) {
   if (nodes.length === 0) return;
 
-  // Use dedicated semantic 3-zone DFD layout whenever diagram is DFD
+  // Use Hub-Anchored 2D Directional Grid whenever explicit multi-axis spatial hints exist
+  if (opts.dirHints && opts.dirHints.size >= 4 && nodes.length >= 4) {
+    assignDirectionalGridPositions(nodes, connectors, opts.dirHints);
+    return;
+  }
+
+  // Use dedicated semantic 3-zone DFD layout whenever diagram is DFD without 2D hints
   const isDfdGraph =
     opts.kind === 'dfd' ||
     nodes.some((n) => n.type.startsWith('dfd_gs_') || n.type.startsWith('dfd_yd_'));
@@ -424,13 +708,16 @@ function assignSugiyamaPositions(nodes, connectors, opts) {
 }
 
 /**
- * Choose natural exit/entry sides for a bound connector based on relative node centers.
+ * Choose natural exit/entry sides for a bound connector based on relative node centers
+ * and optional explicit PlantUML directional hints (`up`, `down`, `left`, `right`).
  * @param {import('../types/schema.js').BoardElement} src
  * @param {import('../types/schema.js').BoardElement} dst
  * @param {'LR' | 'TB'} direction
+ * @param {'up' | 'down' | 'left' | 'right'} [dirHint]
+ * @param {boolean} [is2DGrid]
  * @returns {{ startSide: import('../types/schema.js').PortSide, endSide: import('../types/schema.js').PortSide }}
  */
-function pickOptimalSides(src, dst, direction) {
+function pickOptimalSides(src, dst, direction, dirHint, is2DGrid = false) {
   const sCx = src.x + src.width / 2;
   const sCy = src.y + src.height / 2;
   const dCx = dst.x + dst.width / 2;
@@ -438,7 +725,7 @@ function pickOptimalSides(src, dst, direction) {
   const dx = dCx - sCx;
   const dy = dCy - sCy;
 
-  // Same vertical column (e.g., inter-process P2 -> P3): always connect vertically
+  // Same vertical column (e.g., inter-process P2 -> P3 or P2 -> DT): always connect vertically
   const overlapX = Math.min(src.x + src.width, dst.x + dst.width) - Math.max(src.x, dst.x);
   if (overlapX > 20) {
     return dy >= 0
@@ -452,6 +739,29 @@ function pickOptimalSides(src, dst, direction) {
     return dx >= 0
       ? { startSide: 'right', endSide: 'left' }
       : { startSide: 'left', endSide: 'right' };
+  }
+
+  // In 2D Directional Grid mode, honor diagonal L-bend and outer-perimeter hints cleanly
+  if (is2DGrid && dirHint) {
+    if (dirHint === 'up') {
+      if (dy < -40) {
+        // Long upward jump across multiple columns (e.g. P3 -> Pelanggan): route over top cleanly
+        if (Math.abs(dx) > 420) return { startSide: 'top', endSide: 'top' };
+        return { startSide: 'top', endSide: 'bottom' };
+      }
+    }
+    if (dirHint === 'down') {
+      if (dy > 40) {
+        if (Math.abs(dx) > 260) return { startSide: 'bottom', endSide: 'bottom' };
+        return { startSide: 'bottom', endSide: 'top' };
+      }
+    }
+    if (dirHint === 'left' && dx < -40) {
+      return { startSide: 'left', endSide: dy >= 0 ? 'top' : 'bottom' };
+    }
+    if (dirHint === 'right' && dx > 40) {
+      return { startSide: 'right', endSide: dy >= 0 ? 'top' : 'bottom' };
+    }
   }
 
   if (direction === 'LR') {
@@ -485,8 +795,10 @@ function pickOptimalSides(src, dst, direction) {
  * @param {import('../types/schema.js').BoardElement[]} connectors
  * @param {Map<string, import('../types/schema.js').BoardElement>} nodeById
  * @param {'LR' | 'TB'} direction
+ * @param {Map<string, 'up' | 'down' | 'left' | 'right'>} [dirHints]
  */
-function distributeConnectorPorts(connectors, nodeById, direction) {
+function distributeConnectorPorts(connectors, nodeById, direction, dirHints) {
+  const is2DGrid = Boolean(dirHints && dirHints.size >= 4);
   /**
    * @typedef {{
    *   connector: import('../types/schema.js').BoardElement,
@@ -503,7 +815,13 @@ function distributeConnectorPorts(connectors, nodeById, direction) {
     const dst = c.endBinding ? nodeById.get(c.endBinding.elementId) : null;
     if (!src || !dst) continue;
 
-    const { startSide, endSide } = pickOptimalSides(src, dst, direction);
+    const { startSide, endSide } = pickOptimalSides(
+      src,
+      dst,
+      direction,
+      dirHints?.get(c.id),
+      is2DGrid,
+    );
     const sCx = src.x + src.width / 2;
     const sCy = src.y + src.height / 2;
     const dCx = dst.x + dst.width / 2;
@@ -580,6 +898,45 @@ function distributeConnectorPorts(connectors, nodeById, direction) {
       }
     });
   }
+
+  // Align facing parallel pairs horizontally/vertically when both nodes have different heights/widths
+  // (e.g. 60px Entity <-> 132px Process) so adjacent links are razor-straight with ZERO 10px stair-steps!
+  for (const c of connectors) {
+    if (!c.startBinding || !c.endBinding) continue;
+    const src = nodeById.get(c.startBinding.elementId);
+    const dst = nodeById.get(c.endBinding.elementId);
+    if (!src || !dst) continue;
+    const sSide = c.startBinding.side;
+    const eSide = c.endBinding.side;
+    const sCount = groups.get(`${src.id}:${sSide}`)?.length || 1;
+    const eCount = groups.get(`${dst.id}:${eSide}`)?.length || 1;
+
+    if (
+      ((sSide === 'right' && eSide === 'left') || (sSide === 'left' && eSide === 'right')) &&
+      sCount === eCount &&
+      sCount <= 2
+    ) {
+      const pS = resolveBindingPoint(src, c.startBinding);
+      const pE = resolveBindingPoint(dst, c.endBinding);
+      const targetY = src.height <= dst.height ? pS.y : pE.y;
+      const clampedS = Math.max(0.14, Math.min(0.86, (targetY - src.y) / Math.max(1, src.height)));
+      const clampedE = Math.max(0.14, Math.min(0.86, (targetY - dst.y) / Math.max(1, dst.height)));
+      if (Math.abs((src.y + clampedS * src.height) - (dst.y + clampedE * dst.height)) < 2) {
+        c.startBinding.ry = Math.round(clampedS * 1000) / 1000;
+        c.endBinding.ry = Math.round(clampedE * 1000) / 1000;
+        if (ELLIPSE_PORT_TYPES.has(src.type)) {
+          const d = (c.startBinding.ry - 0.5) * 2;
+          const h = 0.5 * Math.sqrt(Math.max(0, 1 - d * d));
+          c.startBinding.rx = Math.round((sSide === 'left' ? 0.5 - h : 0.5 + h) * 1000) / 1000;
+        }
+        if (ELLIPSE_PORT_TYPES.has(dst.type)) {
+          const d = (c.endBinding.ry - 0.5) * 2;
+          const h = 0.5 * Math.sqrt(Math.max(0, 1 - d * d));
+          c.endBinding.rx = Math.round((eSide === 'left' ? 0.5 - h : 0.5 + h) * 1000) / 1000;
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -600,32 +957,75 @@ function uniqueSortedCoords(values) {
 }
 
 /**
+ * Compute an outward stub point strictly outside an endpoint node's full bounding rectangle
+ * (crucial for circles/ovals whose off-center perimeter points are inset inside the bounding box).
+ * @param {Pt} pt
+ * @param {import('../types/schema.js').PortSide} side
+ * @param {Rect | null} rect
+ * @param {number} stubDist
+ * @returns {Pt}
+ */
+function computeClearStub(pt, side, rect, stubDist) {
+  if (!rect) {
+    const n = getPortNormal(side);
+    return { x: pt.x + n.x * stubDist, y: pt.y + n.y * stubDist };
+  }
+  switch (side) {
+    case 'top':
+      return { x: pt.x, y: rect.y - stubDist };
+    case 'bottom':
+      return { x: pt.x, y: rect.y + rect.height + stubDist };
+    case 'left':
+      return { x: rect.x - stubDist, y: pt.y };
+    case 'right':
+      return { x: rect.x + rect.width + stubDist, y: pt.y };
+    default:
+      return pt;
+  }
+}
+
+/**
  * Stage 3: Multi-Track Visibility-Grid A* Router with Obstacle Avoidance & Strong Congestion Cost.
+ * Keeps BOTH source and target nodes as solid forbidden obstacles so wires NEVER cut through
+ * their own endpoints (e.g. never poking from inside a circle or rectangle to its outer border).
  * @param {Pt} start
  * @param {Pt} end
  * @param {import('../types/schema.js').PortSide} startSide
  * @param {import('../types/schema.js').PortSide} endSide
  * @param {Array<{ id: string, rect: Rect }>} obstacles
- * @param {Set<string>} ignoreIds
+ * @param {Set<string>} endpointIds
  * @param {Array<{ a: Pt, b: Pt }>} usedSegments
+ * @param {Rect | null} [srcRect]
+ * @param {Rect | null} [dstRect]
  * @returns {Pt[]}
  */
-function routeObstacleAvoidingOrtho(start, end, startSide, endSide, obstacles, ignoreIds, usedSegments) {
+function routeObstacleAvoidingOrtho(
+  start,
+  end,
+  startSide,
+  endSide,
+  obstacles,
+  endpointIds,
+  usedSegments,
+  srcRect = null,
+  dstRect = null,
+) {
   const stubDist = 28;
   const pad = 22;
-  const sNorm = getPortNormal(startSide);
-  const eNorm = getPortNormal(endSide);
-  const sStub = { x: start.x + sNorm.x * stubDist, y: start.y + sNorm.y * stubDist };
-  const eStub = { x: end.x + eNorm.x * stubDist, y: end.y + eNorm.y * stubDist };
+  const endpointPad = 4;
+  const sStub = computeClearStub(start, startSide, srcRect, stubDist);
+  const eStub = computeClearStub(end, endSide, dstRect, stubDist);
 
-  const activeObstacles = obstacles
-    .filter((o) => !ignoreIds.has(o.id))
-    .map((o) => ({
-      x: o.rect.x - pad,
-      y: o.rect.y - pad,
-      width: o.rect.width + pad * 2,
-      height: o.rect.height + pad * 2,
-    }));
+  // Include ALL nodes as solid obstacles (tight 4px pad on src/dst, generous 22px pad on all others)
+  const activeObstacles = obstacles.map((o) => {
+    const p = endpointIds.has(o.id) ? endpointPad : pad;
+    return {
+      x: o.rect.x - p,
+      y: o.rect.y - p,
+      width: o.rect.width + p * 2,
+      height: o.rect.height + p * 2,
+    };
+  });
 
   const rawX = [start.x, end.x, sStub.x, eStub.x, (sStub.x + eStub.x) / 2];
   const rawY = [start.y, end.y, sStub.y, eStub.y, (sStub.y + eStub.y) / 2];
@@ -925,11 +1325,23 @@ function nudgeParallelSegments(routedList, obstacles, skipIds = new Set()) {
       const candA = entry.axis === 'x' ? { x: a.x + offset, y: a.y } : { x: a.x, y: a.y + offset };
       const candB = entry.axis === 'x' ? { x: b.x + offset, y: b.y } : { x: b.x, y: b.y + offset };
 
-      const conn = routedList[entry.idx].connector;
-      const ignore = new Set([conn.startBinding?.elementId || '', conn.endBinding?.elementId || '']);
-      const blocked = obstacles.some(
-        (o) => !ignore.has(o.id) && orthoSegmentHitsRect(candA, candB, o.rect),
-      );
+      const prevPt = pts[entry.segIdx - 1];
+      const nextPt = pts[entry.segIdx + 2];
+      // Never nudge any interior segment (or its adjacent arm) inside ANY node, including src & dst!
+      const blocked = obstacles.some((o) => {
+        const padded = {
+          x: o.rect.x - 4,
+          y: o.rect.y - 4,
+          width: o.rect.width + 8,
+          height: o.rect.height + 8,
+        };
+        if (orthoSegmentHitsRect(candA, candB, padded)) return true;
+        if (prevPt && entry.segIdx > 1 && orthoSegmentHitsRect(prevPt, candA, padded)) return true;
+        if (nextPt && entry.segIdx + 2 < pts.length - 1 && orthoSegmentHitsRect(candB, nextPt, padded)) {
+          return true;
+        }
+        return false;
+      });
       if (!blocked) {
         pts[entry.segIdx] = candA;
         pts[entry.segIdx + 1] = candB;
@@ -1215,7 +1627,7 @@ function routeClearCorridorChannels(connectors, nodeById, obstacles) {
     }
     if (blockedMiddle || clearMaxX - clearMinX < 48) continue;
 
-    if (Math.abs(start.y - end.y) < 3) {
+    if (Math.abs(start.y - end.y) < 0.8) {
       routed.set(conn.id, simplifyOrthoPath([start, end]));
       continue;
     }
@@ -1342,7 +1754,7 @@ function routeClearCorridorChannels(connectors, nodeById, obstacles) {
  * Route all bound orthogonal connectors cleanly around obstacle nodes with distributed ports,
  * multi-lane separation, and collision-free label placement.
  * @param {import('../types/schema.js').BoardElement[]} elements
- * @param {{ direction?: 'LR' | 'TB' }} [options]
+ * @param {{ direction?: 'LR' | 'TB', dirHints?: Map<string, 'up' | 'down' | 'left' | 'right'> }} [options]
  * @returns {import('../types/schema.js').BoardElement[]}
  */
 export function routeConnectorsCleanly(elements, options = {}) {
@@ -1357,7 +1769,7 @@ export function routeConnectorsCleanly(elements, options = {}) {
   );
   if (connectors.length === 0) return cloned;
 
-  distributeConnectorPorts(connectors, nodeById, direction);
+  distributeConnectorPorts(connectors, nodeById, direction, options.dirHints);
 
   const obstacles = cloned
     .filter((e) => isConnectableElement(e) && !CONTAINER_TYPES.has(e.type))
@@ -1411,6 +1823,8 @@ export function routeConnectorsCleanly(elements, options = {}) {
         obstacles,
         new Set([src.id, dst.id]),
         usedSegments,
+        getNormalizedRect(src),
+        getNormalizedRect(dst),
       );
 
     routedList.push({ connector: conn, path: fullPath });
@@ -1448,7 +1862,12 @@ export function routeConnectorsCleanly(elements, options = {}) {
  * 5. Collision-free connector label placement
  *
  * @param {import('../types/schema.js').BoardElement[]} elements
- * @param {{ direction?: 'LR' | 'TB', kind?: string, skipNodeLayout?: boolean }} [options]
+ * @param {{
+ *   direction?: 'LR' | 'TB',
+ *   kind?: string,
+ *   skipNodeLayout?: boolean,
+ *   dirHints?: Map<string, 'up' | 'down' | 'left' | 'right'>
+ * }} [options]
  * @returns {import('../types/schema.js').BoardElement[]}
  */
 export function layoutDiagramElements(elements, options = {}) {
@@ -1465,7 +1884,11 @@ export function layoutDiagramElements(elements, options = {}) {
       (e) => e.type === 'connector' && e.startBinding && e.endBinding,
     );
 
-    assignSugiyamaPositions(layoutNodes, boundConnectors, { direction, kind: options.kind });
+    assignSugiyamaPositions(layoutNodes, boundConnectors, {
+      direction,
+      kind: options.kind,
+      dirHints: options.dirHints,
+    });
 
     const boundaries = cloned.filter((e) => e.type === 'uml_boundary');
     const useCases = cloned.filter((e) => e.type === 'uml_usecase');
@@ -1487,5 +1910,5 @@ export function layoutDiagramElements(elements, options = {}) {
     }
   }
 
-  return routeConnectorsCleanly(cloned, { direction });
+  return routeConnectorsCleanly(cloned, { direction, dirHints: options.dirHints });
 }

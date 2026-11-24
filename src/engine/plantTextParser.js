@@ -238,6 +238,66 @@ function cleanPlantLabel(raw) {
 }
 
 /**
+ * Extract custom skinparam fill/border colors for DFD stereotypes (`<<External>>`, `<<Process>>`, `<<DataStore>>`).
+ * @param {string} raw
+ * @returns {{
+ *   external?: { fill?: string, stroke?: string },
+ *   process?: { fill?: string, stroke?: string },
+ *   datastore?: { fill?: string, stroke?: string },
+ * }}
+ */
+function extractDfdSkinparams(raw) {
+  /** @type {{ external?: { fill?: string, stroke?: string }, process?: { fill?: string, stroke?: string }, datastore?: { fill?: string, stroke?: string } }} */
+  const out = {};
+  const blockRe = /skinparam\s+[a-z]+\s*<<([^>]+)>>\s*\{([\s\S]*?)\}/gi;
+  let match = blockRe.exec(raw);
+  while (match) {
+    const st = match[1].trim().toLowerCase();
+    const body = match[2];
+    const bgMatch = body.match(/BackgroundColor\s+(#[0-9a-fA-F]{3,6})/i);
+    const bdMatch = body.match(/BorderColor\s+(#[0-9a-fA-F]{3,6})/i);
+    const style = {
+      fill: bgMatch ? bgMatch[1].toUpperCase() : undefined,
+      stroke: bdMatch ? bdMatch[1].toUpperCase() : undefined,
+    };
+    if (st.includes('external') || st.includes('entity') || st.includes('aktor')) {
+      out.external = style;
+    } else if (st.includes('process') || st.includes('proses')) {
+      out.process = style;
+    } else if (st.includes('store') || st.includes('data')) {
+      out.datastore = style;
+    }
+    match = blockRe.exec(raw);
+  }
+  return out;
+}
+
+/**
+ * Extract explicit directional arrow hint (`up`, `down`, `left`, `right`) from a raw PlantUML flow line.
+ * @param {string} rawLine
+ * @param {boolean} reversed True when arrow points right-to-left (`<-dir-`)
+ * @returns {'up' | 'down' | 'left' | 'right' | null}
+ */
+function extractFlowDirHint(rawLine, reversed) {
+  const m = rawLine.match(/[-.](?:\[[^\]]+\])?(up|down|left|right|u|d|l|r)[-.]/i);
+  if (!m) return null;
+  const tok = m[1].toLowerCase();
+  /** @type {'up' | 'down' | 'left' | 'right'} */
+  let dir =
+    tok === 'u' || tok === 'up'
+      ? 'up'
+      : tok === 'd' || tok === 'down'
+        ? 'down'
+        : tok === 'l' || tok === 'left'
+          ? 'left'
+          : 'right';
+  if (reversed) {
+    dir = dir === 'up' ? 'down' : dir === 'down' ? 'up' : dir === 'left' ? 'right' : 'left';
+  }
+  return dir;
+}
+
+/**
  * Map PlantUML arrow color token (`#1565C0`, `#2E7D32`, etc.) to DESIGN.md canvas stroke tokens.
  * @param {string} rawArrowLine
  * @returns {string}
@@ -1337,21 +1397,26 @@ function parseFlowchart(lines, roughness) {
 
 /**
  * Parse PlantUML syntax mapped to DFD symbols (Gane & Sarson or Yourdon & DeMarco).
- * Supports colors, stereotypes, Creole formatting (`**bold**`, `<color>`), `[hidden]` layout hints,
- * reversed `keyword alias as "Label"`, `\n` newlines, and directional arrows (`-down->`, `-right->`).
+ * Supports colors, skinparam themes, stereotypes, Creole formatting (`**bold**`, `<color>`),
+ * `[hidden]` layout hints, reversed `keyword alias as "Label"`, `\n` newlines, and directional arrows.
  * @param {string[]} lines
  * @param {number} roughness
- * @param {{ notation?: 'gane_sarson' | 'yourdon' }} [options]
+ * @param {{ notation?: 'gane_sarson' | 'yourdon', rawSource?: string }} [options]
  */
 function parseDfd(lines, roughness, options = {}) {
   const useYourdon = options.notation === 'yourdon';
+  const skin = extractDfdSkinparams(options.rawSource || '');
+  const isNeutralTheme =
+    skin.external?.fill === '#F5F5F5' ||
+    skin.process?.fill === '#F5F5F5' ||
+    skin.external?.stroke === '#666666';
   const entityType = useYourdon ? 'dfd_yd_entity' : 'dfd_gs_entity';
   const processType = useYourdon ? 'dfd_yd_process' : 'dfd_gs_process';
   const storeType = useYourdon ? 'dfd_yd_datastore' : 'dfd_gs_datastore';
 
   /** @type {Map<string, { id: string, role: 'entity' | 'process' | 'datastore', code: string, text: string }>} */
   const nodesMap = new Map();
-  /** @type {Array<{ from: string, to: string, label: string, dashed: boolean, color: string }>} */
+  /** @type {Array<{ from: string, to: string, label: string, dashed: boolean, color: string, dirHint: 'up' | 'down' | 'left' | 'right' | null }>} */
   const flows = [];
 
   let procCounter = 1;
@@ -1414,8 +1479,10 @@ function parseDfd(lines, roughness, options = {}) {
     const role = inferDfdRole(alias, rawLabel, kw, stereo);
     const cleaned = cleanPlantLabel(rawLabel);
     if (role === 'datastore') {
-      const defaultCode = /^(D|DS)\d+$/i.test(alias) ? alias.toUpperCase() : `D${storeCounter++}`;
-      const { code, text } = splitCode(cleaned, defaultCode);
+      // Only assign D1/D2 prefix if explicitly present in label/alias (or in Gane-Sarson notation)
+      const explicitAliasCode = /^(D|DS)\d+$/i.test(alias) ? alias.toUpperCase() : '';
+      const fallbackCode = useYourdon ? explicitAliasCode : explicitAliasCode || `D${storeCounter++}`;
+      const { code, text } = splitCode(cleaned, fallbackCode);
       nodesMap.set(alias, { id: crypto.randomUUID(), role, code, text });
     } else if (role === 'process') {
       const defaultCode = /^P\d+$/i.test(alias) ? `${alias.slice(1)}.0` : `${procCounter++}.0`;
@@ -1482,9 +1549,26 @@ function parseDfd(lines, roughness, options = {}) {
       if (!nodesMap.has(from)) registerNode(from, from, '', '');
       if (!nodesMap.has(to)) registerNode(to, to, '', '');
 
-      flows.push({ from, to, label, dashed: arrow.includes('.'), color });
+      const dirHint = extractFlowDirHint(line, reversed);
+      flows.push({ from, to, label, dashed: arrow.includes('.'), color, dirHint });
     }
   }
+
+  const horizHintCount = flows.filter((f) => f.dirHint === 'left' || f.dirHint === 'right').length;
+  const vertHintCount = flows.filter((f) => f.dirHint === 'up' || f.dirHint === 'down').length;
+  const hasMultiAxisHints = horizHintCount >= 2 && vertHintCount >= 2;
+
+  const entityFill = skin.external?.fill || (isNeutralTheme ? '#F1F5F9' : '#DBEAFE');
+  const entityStroke = skin.external?.stroke || (isNeutralTheme ? '#475569' : '#1D4ED8');
+  const procFill = skin.process?.fill || (isNeutralTheme ? '#F1F5F9' : '#FEF3C7');
+  const procStroke = skin.process?.stroke || (isNeutralTheme ? '#475569' : '#B45309');
+  const rawStoreStroke = skin.datastore?.stroke;
+  const storeStroke =
+    rawStoreStroke && rawStoreStroke !== '#FFFFFF'
+      ? rawStoreStroke
+      : isNeutralTheme
+        ? '#0F172A'
+        : '#15803D';
 
   const entities = Array.from(nodesMap.entries()).filter(([, n]) => n.role === 'entity');
   const processes = Array.from(nodesMap.entries()).filter(([, n]) => n.role === 'process');
@@ -1494,6 +1578,8 @@ function parseDfd(lines, roughness, options = {}) {
   const elements = [];
   /** @type {Map<string, import('../types/schema.js').BoardElement>} */
   const positioned = new Map();
+  /** @type {Map<string, 'up' | 'down' | 'left' | 'right'>} */
+  const dirHints = new Map();
 
   entities.forEach(([alias, n], idx) => {
     /** @type {import('../types/schema.js').BoardElement} */
@@ -1502,10 +1588,10 @@ function parseDfd(lines, roughness, options = {}) {
       type: entityType,
       x: 80,
       y: 100 + idx * 140,
-      width: 164,
-      height: 76,
-      strokeColor: '#1D4ED8',
-      fillColor: '#DBEAFE',
+      width: hasMultiAxisHints ? 132 : 164,
+      height: hasMultiAxisHints ? 60 : 76,
+      strokeColor: entityStroke,
+      fillColor: entityFill,
       strokeWidth: 2,
       strokeStyle: 'solid',
       roughness,
@@ -1526,10 +1612,10 @@ function parseDfd(lines, roughness, options = {}) {
       type: processType,
       x: 480,
       y: 80 + idx * 180,
-      width: useYourdon ? 148 : 188,
-      height: useYourdon ? 148 : 98,
-      strokeColor: '#B45309',
-      fillColor: '#FEF3C7',
+      width: useYourdon ? (hasMultiAxisHints ? 132 : 148) : 188,
+      height: useYourdon ? (hasMultiAxisHints ? 132 : 148) : 98,
+      strokeColor: procStroke,
+      fillColor: procFill,
       strokeWidth: 2,
       strokeStyle: 'solid',
       roughness,
@@ -1545,16 +1631,16 @@ function parseDfd(lines, roughness, options = {}) {
   });
 
   stores.forEach(([alias, n], idx) => {
-    const storeText = useYourdon ? `${n.code}  ${n.text}`.trim() : n.text;
+    const storeText = useYourdon && n.code ? `${n.code}  ${n.text}`.trim() : n.text;
     /** @type {import('../types/schema.js').BoardElement} */
     const el = {
       id: n.id,
       type: storeType,
       x: 920,
       y: 100 + idx * 140,
-      width: 224,
-      height: 58,
-      strokeColor: '#15803D',
+      width: hasMultiAxisHints ? 168 : 224,
+      height: hasMultiAxisHints ? 46 : 58,
+      strokeColor: storeStroke,
       fillColor: '#FFFFFF',
       strokeWidth: 2,
       strokeStyle: 'solid',
@@ -1574,20 +1660,22 @@ function parseDfd(lines, roughness, options = {}) {
     const src = positioned.get(f.from);
     const dst = positioned.get(f.to);
     if (!src || !dst) continue;
-    elements.push(
-      makeBoundConnector(src, dst, {
-        label: f.label,
-        routing: 'elbow',
-        strokeColor: f.color,
-        strokeStyle: f.dashed ? 'dashed' : 'solid',
-        startMarker: 'none',
-        endMarker: 'filled_arrow',
-        roughness,
-      }),
-    );
+    const conn = makeBoundConnector(src, dst, {
+      label: f.label,
+      routing: 'elbow',
+      strokeColor: f.color,
+      strokeStyle: f.dashed ? 'dashed' : 'solid',
+      startMarker: 'none',
+      endMarker: 'filled_arrow',
+      roughness,
+    });
+    if (f.dirHint) {
+      dirHints.set(conn.id, f.dirHint);
+    }
+    elements.push(conn);
   }
 
-  return elements;
+  return { elements, dirHints, hasMultiAxisHints };
 }
 
 /**
@@ -1615,7 +1703,9 @@ export function parsePlantText(source, options = {}) {
   const requestedKind = options.kind || 'auto';
   const kind = requestedKind === 'auto' ? detectPlantDiagramKind(lines, source) : requestedKind;
   const roughness = options.renderMode === 'sketch' ? 1.3 : 0;
-  const isYourdon = /yourdon|demarco/i.test(source);
+  const isYourdon =
+    /yourdon|demarco/i.test(source) ||
+    (/usecase\s+/i.test(source) && /<<DataStore>>|----\s*\\n|━━━/i.test(source));
 
   /** @type {import('../types/schema.js').BoardElement[]} */
   let elements = [];
@@ -1644,12 +1734,19 @@ export function parsePlantText(source, options = {}) {
       });
       break;
     case 'dfd':
-    default:
-      elements = layoutDiagramElements(
-        parseDfd(lines, roughness, { notation: isYourdon ? 'yourdon' : 'gane_sarson' }),
-        { direction: 'LR', kind },
-      );
+    default: {
+      const dfdParsed = parseDfd(lines, roughness, {
+        notation: isYourdon ? 'yourdon' : 'gane_sarson',
+        rawSource: source,
+      });
+      const preferTB = /top\s+to\s+bottom\s+direction/i.test(source);
+      elements = layoutDiagramElements(dfdParsed.elements, {
+        direction: preferTB ? 'TB' : 'LR',
+        kind,
+        dirHints: dfdParsed.hasMultiAxisHints ? dfdParsed.dirHints : undefined,
+      });
       break;
+    }
   }
 
   if (elements.length === 0) {
