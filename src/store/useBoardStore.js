@@ -84,6 +84,8 @@ export const useBoardStore = create((set, get) => ({
   future: [],
   /** @type {import('../types/schema.js').BoardElement[]} */
   clipboard: [],
+  /** @type {{ width: number, height: number } | null} */
+  copiedSize: null,
 
   // Drawing defaults for new connectors / pens
   defaultStrokeColor: '#0F172A',
@@ -98,6 +100,7 @@ export const useBoardStore = create((set, get) => ({
   setEditingId: (id) => set({ editingId: id }),
   setCamera: (camera) => set({ camera }),
   setDefaultStyle: (patch) => set(patch),
+  setCopiedSize: (copiedSize) => set({ copiedSize }),
 
   scheduleAutosave: () => {
     set({ saveStatus: 'dirty' });
@@ -148,6 +151,7 @@ export const useBoardStore = create((set, get) => ({
       selectedIds: [],
       past: [],
       future: [],
+      copiedSize: null,
       feedback: null,
     });
   },

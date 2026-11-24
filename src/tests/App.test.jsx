@@ -23,6 +23,7 @@ describe('FlowBoard UI integration', () => {
       editingId: null,
       past: [],
       future: [],
+      copiedSize: null,
     });
   });
 
@@ -272,5 +273,54 @@ describe('FlowBoard UI integration', () => {
       expect(morphed?.text).toBe(targetNode.text);
       expect(screen.queryByRole('menu', { name: 'Ganti bentuk komponen' })).not.toBeInTheDocument();
     }
-  }, 15000);
+
+    // Manual size editing, aspect ratio lock, copy/paste size, and multi-select equalize
+    const resizableNodes = useBoardStore
+      .getState()
+      .elements.filter((el) => el.type !== 'connector' && el.type !== 'freehand');
+    expect(resizableNodes.length).toBeGreaterThanOrEqual(3);
+    const [nodeA, nodeB, nodeC] = resizableNodes;
+
+    act(() => {
+      useBoardStore.getState().setSelectedIds([nodeA.id]);
+    });
+
+    const widthInput = screen.getByLabelText('Lebar komponen dalam piksel');
+    const heightInput = screen.getByLabelText('Tinggi komponen dalam piksel');
+    await user.clear(widthInput);
+    await user.type(widthInput, '200');
+    await user.clear(heightInput);
+    await user.type(heightInput, '100');
+
+    let updatedA = useBoardStore.getState().elements.find((el) => el.id === nodeA.id);
+    expect(updatedA?.width).toBe(200);
+    expect(updatedA?.height).toBe(100);
+
+    // Lock aspect ratio (2:1) and resize width to 240 -> height scales to 120
+    await user.click(screen.getByRole('button', { name: 'Kunci rasio aspek' }));
+    await user.clear(widthInput);
+    await user.type(widthInput, '240');
+    updatedA = useBoardStore.getState().elements.find((el) => el.id === nodeA.id);
+    expect(updatedA?.width).toBe(240);
+    expect(updatedA?.height).toBe(120);
+
+    // Copy size from nodeA and paste onto nodeB without duplicating
+    await user.click(screen.getByRole('button', { name: 'Salin Ukuran' }));
+    act(() => {
+      useBoardStore.getState().setSelectedIds([nodeB.id]);
+    });
+    await user.click(screen.getByRole('button', { name: /Tempel \(240×120\)/i }));
+    const updatedB = useBoardStore.getState().elements.find((el) => el.id === nodeB.id);
+    expect(updatedB?.width).toBe(240);
+    expect(updatedB?.height).toBe(120);
+
+    // Multi-select nodeA (reference) + nodeC and equalize both width & height in 1 click
+    act(() => {
+      useBoardStore.getState().setSelectedIds([nodeA.id, nodeC.id]);
+    });
+    await user.click(screen.getByRole('button', { name: 'Samakan L & T' }));
+    const updatedC = useBoardStore.getState().elements.find((el) => el.id === nodeC.id);
+    expect(updatedC?.width).toBe(240);
+    expect(updatedC?.height).toBe(120);
+  }, 20000);
 });

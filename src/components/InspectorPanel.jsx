@@ -1,8 +1,11 @@
+import { useRef, useState } from 'react';
 import {
   ArrowDownToLine,
   ArrowLeftRight,
   ArrowUpToLine,
+  ClipboardPaste,
   Copy,
+  Link2,
   Lock,
   PanelRightClose,
   PanelRightOpen,
@@ -10,6 +13,7 @@ import {
   RotateCcw,
   RotateCw,
   Trash2,
+  Unlink2,
   Unlock,
   X,
 } from 'lucide-react';
@@ -18,9 +22,42 @@ import {
   CANVAS_STROKE_SWATCHES,
   STROKE_WIDTH_OPTIONS,
 } from '../constants/tokens.js';
-import { normalizeRotation } from '../engine/ports.js';
+import { getNormalizedRect, normalizeRotation } from '../engine/ports.js';
 import { useBoardStore } from '../store/useBoardStore.js';
 import { MarkerPicker } from './MarkerPicker.jsx';
+
+const MIN_ELEMENT_SIZE = 24;
+const MAX_ELEMENT_SIZE = 4000;
+
+/**
+ * Clamp manual pixel dimension to valid board bounds.
+ * @param {number} value
+ * @returns {number}
+ */
+function clampDimension(value) {
+  return Math.round(Math.min(MAX_ELEMENT_SIZE, Math.max(MIN_ELEMENT_SIZE, value)));
+}
+
+/**
+ * Build a normalized width/height update patch for a resizable element.
+ * @param {import('../types/schema.js').BoardElement} el
+ * @param {number | null} nextWidth
+ * @param {number | null} nextHeight
+ */
+function buildSizePatch(el, nextWidth, nextHeight) {
+  const rect = getNormalizedRect(el);
+  /** @type {Partial<import('../types/schema.js').BoardElement>} */
+  const patch = {};
+  if (typeof nextWidth === 'number') {
+    patch.x = rect.x;
+    patch.width = clampDimension(nextWidth);
+  }
+  if (typeof nextHeight === 'number') {
+    patch.y = rect.y;
+    patch.height = clampDimension(nextHeight);
+  }
+  return patch;
+}
 
 const FONT_SIZE_OPTIONS = [
   { label: '12', value: 12 },
@@ -58,6 +95,17 @@ function getSharedValue(list, getter) {
  * @param {{ open: boolean, onToggle: () => void }} props
  */
 export function InspectorPanel({ open, onToggle }) {
+  const [lockAspectRatio, setLockAspectRatio] = useState(false);
+  const [focusedDim, setFocusedDim] = useState(/** @type {'width' | 'height' | null} */ (null));
+  const [widthDraft, setWidthDraft] = useState('');
+  const [heightDraft, setHeightDraft] = useState('');
+  const dimSessionRef = useRef(
+    /** @type {{ ratios: Map<string, number>, historyCommitted: boolean }} */ ({
+      ratios: new Map(),
+      historyCommitted: false,
+    }),
+  );
+
   const elements = useBoardStore((s) => s.elements);
   const selectedIds = useBoardStore((s) => s.selectedIds);
   const settings = useBoardStore((s) => s.settings);
@@ -65,6 +113,7 @@ export function InspectorPanel({ open, onToggle }) {
   const defaultFillColor = useBoardStore((s) => s.defaultFillColor);
   const defaultRouting = useBoardStore((s) => s.defaultRouting);
   const defaultEndMarker = useBoardStore((s) => s.defaultEndMarker);
+  const copiedSize = useBoardStore((s) => s.copiedSize);
 
   const updateSelectedElements = useBoardStore((s) => s.updateSelectedElements);
   const updateElementById = useBoardStore((s) => s.updateElementById);
@@ -72,6 +121,8 @@ export function InspectorPanel({ open, onToggle }) {
   const duplicateSelected = useBoardStore((s) => s.duplicateSelected);
   const reorderSelected = useBoardStore((s) => s.reorderSelected);
   const setDefaultStyle = useBoardStore((s) => s.setDefaultStyle);
+  const setCopiedSize = useBoardStore((s) => s.setCopiedSize);
+  const setFeedback = useBoardStore((s) => s.setFeedback);
   const updateSettings = useBoardStore((s) => s.updateSettings);
   const autoLayoutBoard = useBoardStore((s) => s.autoLayoutBoard);
 
@@ -102,6 +153,20 @@ export function InspectorPanel({ open, onToggle }) {
   const styleLineElements = selectedElements.filter((e) => e.type !== 'freehand' && e.type !== 'text');
   const renderableElements = selectedElements.filter((e) => e.type !== 'freehand');
   const rotatableElements = selectedElements.filter((e) => e.type !== 'connector' && e.type !== 'freehand');
+  const resizableElements = rotatableElements;
+  const elementsById = new Map(elements.map((e) => [e.id, e]));
+  const orderedResizable = selectedIds
+    .map((id) => elementsById.get(id))
+    .filter(
+      /** @returns {e is import('../types/schema.js').BoardElement} */ (e) =>
+        Boolean(e && e.type !== 'connector' && e.type !== 'freehand'),
+    );
+  const referenceResizable = orderedResizable[0] || resizableElements[0] || null;
+  const referenceRect = referenceResizable ? getNormalizedRect(referenceResizable) : null;
+  const referenceWidth = referenceRect ? Math.round(referenceRect.width) : 0;
+  const referenceHeight = referenceRect ? Math.round(referenceRect.height) : 0;
+  const allResizableLocked =
+    resizableElements.length > 0 && resizableElements.every((e) => Boolean(e.locked));
 
   const isConnectorOnly = primary?.type === 'connector';
   const isErdTable = primary?.type === 'erd_table' || primary?.type === 'erd_weak_table';
@@ -127,6 +192,74 @@ export function InspectorPanel({ open, onToggle }) {
   const sharedStartMarker = getSharedValue(connectorElements, (e) => e.startMarker || 'none');
   const sharedEndMarker = getSharedValue(connectorElements, (e) => e.endMarker || 'none');
   const sharedRotation = getSharedValue(rotatableElements, (e) => normalizeRotation(e.rotation || 0));
+  const sharedWidth = getSharedValue(resizableElements, (e) => Math.round(getNormalizedRect(e).width));
+  const sharedHeight = getSharedValue(resizableElements, (e) => Math.round(getNormalizedRect(e).height));
+
+  /**
+   * Capture each selected resizable element's aspect ratio at focus start so mid-typing
+   * intermediate digits (e.g. "24" while typing "240") never distort the locked ratio.
+   */
+  function startDimensionSession() {
+    const ratios = new Map();
+    for (const el of resizableElements) {
+      const rect = getNormalizedRect(el);
+      ratios.set(el.id, Math.max(1, rect.width) / Math.max(1, rect.height));
+    }
+    dimSessionRef.current = { ratios, historyCommitted: false };
+  }
+
+  /**
+   * Apply manual width and/or height to all selected unlocked resizable elements.
+   * @param {{ width?: number, height?: number, respectRatio?: boolean, useSession?: boolean }} next
+   */
+  function applyManualDimensions({ width, height, respectRatio = false, useSession = false }) {
+    const skipHistory = useSession && dimSessionRef.current.historyCommitted;
+    updateSelectedElements(
+      (el) => {
+        if (el.type === 'connector' || el.type === 'freehand' || el.locked) return null;
+        const rect = getNormalizedRect(el);
+        const currentRatio = Math.max(1, rect.width) / Math.max(1, rect.height);
+        const ratio =
+          useSession && dimSessionRef.current.ratios.has(el.id)
+            ? /** @type {number} */ (dimSessionRef.current.ratios.get(el.id))
+            : currentRatio;
+        let nextW = typeof width === 'number' ? clampDimension(width) : null;
+        let nextH = typeof height === 'number' ? clampDimension(height) : null;
+
+        if (respectRatio && lockAspectRatio) {
+          if (nextW !== null && nextH === null) {
+            nextH = clampDimension(nextW / ratio);
+          } else if (nextH !== null && nextW === null) {
+            nextW = clampDimension(nextH * ratio);
+          }
+        }
+
+        return buildSizePatch(el, nextW, nextH);
+      },
+      { skipHistory },
+    );
+    if (useSession) {
+      dimSessionRef.current.historyCommitted = true;
+    }
+  }
+
+  /**
+   * Commit a manual dimension draft string on blur or Enter.
+   * @param {'width' | 'height'} axis
+   * @param {string} raw
+   */
+  function commitDimensionDraft(axis, raw) {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = clampDimension(parsed);
+    if (axis === 'width') {
+      applyManualDimensions({ width: clamped, respectRatio: true, useSession: true });
+    } else {
+      applyManualDimensions({ height: clamped, respectRatio: true, useSession: true });
+    }
+  }
 
   /** @param {string} id @param {import('../types/schema.js').ErdField[]} fields */
   function syncErdFields(id, fields) {
@@ -364,6 +497,255 @@ export function InspectorPanel({ open, onToggle }) {
                   </strong>
                 </span>
               </div>
+            )}
+
+            {/* Manual Size & Equalize controls (works for single & multi-select shapes/symbols) */}
+            {resizableElements.length > 0 && (
+              <section className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-semibold text-[#0F172A]">
+                    Ukuran Komponen{resizableElements.length > 1 ? ` (${resizableElements.length})` : ''}
+                  </h3>
+                  <button
+                    type="button"
+                    aria-label="Kunci rasio aspek"
+                    aria-pressed={lockAspectRatio}
+                    title={lockAspectRatio ? 'Buka kunci rasio aspek' : 'Kunci rasio aspek'}
+                    onClick={() => setLockAspectRatio((v) => !v)}
+                    className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      lockAspectRatio
+                        ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
+                        : 'border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9]'
+                    }`}
+                  >
+                    {lockAspectRatio ? (
+                      <Link2 className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                    ) : (
+                      <Unlink2 className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                    )}
+                    <span>Rasio</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label htmlFor="prop-width-input" className="block text-[11px] text-[#475569] mb-1">
+                      Lebar (px)
+                    </label>
+                    <div className="relative flex items-center">
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute left-2 text-[11px] font-semibold text-[#475569]"
+                      >
+                        L
+                      </span>
+                      <input
+                        id="prop-width-input"
+                        aria-label="Lebar komponen dalam piksel"
+                        type="number"
+                        min={MIN_ELEMENT_SIZE}
+                        max={MAX_ELEMENT_SIZE}
+                        step={1}
+                        disabled={allResizableLocked}
+                        value={
+                          focusedDim === 'width'
+                            ? widthDraft
+                            : typeof sharedWidth === 'number'
+                              ? String(sharedWidth)
+                              : ''
+                        }
+                        placeholder={sharedWidth === '__mixed__' ? 'Campuran' : '—'}
+                        onFocus={() => {
+                          startDimensionSession();
+                          setFocusedDim('width');
+                          setWidthDraft(typeof sharedWidth === 'number' ? String(sharedWidth) : '');
+                        }}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setWidthDraft(raw);
+                          const parsed = Number(raw);
+                          if (raw.trim() !== '' && Number.isFinite(parsed) && parsed >= MIN_ELEMENT_SIZE) {
+                            applyManualDimensions({ width: parsed, respectRatio: true, useSession: true });
+                          }
+                        }}
+                        onBlur={(e) => {
+                          commitDimensionDraft('width', e.target.value);
+                          setFocusedDim(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitDimensionDraft('width', e.currentTarget.value);
+                            e.currentTarget.blur();
+                          } else if (e.key === 'Escape') {
+                            setFocusedDim(null);
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] pl-6 pr-6 py-1.5 text-right font-mono-tabular text-xs text-[#0F172A] focus:border-[#1D4ED8] focus:outline-none disabled:bg-[#F8FAFC] disabled:text-[#94A3B8]"
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-2 text-[10px] text-[#94A3B8]"
+                      >
+                        px
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="prop-height-input" className="block text-[11px] text-[#475569] mb-1">
+                      Tinggi (px)
+                    </label>
+                    <div className="relative flex items-center">
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute left-2 text-[11px] font-semibold text-[#475569]"
+                      >
+                        T
+                      </span>
+                      <input
+                        id="prop-height-input"
+                        aria-label="Tinggi komponen dalam piksel"
+                        type="number"
+                        min={MIN_ELEMENT_SIZE}
+                        max={MAX_ELEMENT_SIZE}
+                        step={1}
+                        disabled={allResizableLocked}
+                        value={
+                          focusedDim === 'height'
+                            ? heightDraft
+                            : typeof sharedHeight === 'number'
+                              ? String(sharedHeight)
+                              : ''
+                        }
+                        placeholder={sharedHeight === '__mixed__' ? 'Campuran' : '—'}
+                        onFocus={() => {
+                          startDimensionSession();
+                          setFocusedDim('height');
+                          setHeightDraft(typeof sharedHeight === 'number' ? String(sharedHeight) : '');
+                        }}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setHeightDraft(raw);
+                          const parsed = Number(raw);
+                          if (raw.trim() !== '' && Number.isFinite(parsed) && parsed >= MIN_ELEMENT_SIZE) {
+                            applyManualDimensions({ height: parsed, respectRatio: true, useSession: true });
+                          }
+                        }}
+                        onBlur={(e) => {
+                          commitDimensionDraft('height', e.target.value);
+                          setFocusedDim(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitDimensionDraft('height', e.currentTarget.value);
+                            e.currentTarget.blur();
+                          } else if (e.key === 'Escape') {
+                            setFocusedDim(null);
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] pl-6 pr-6 py-1.5 text-right font-mono-tabular text-xs text-[#0F172A] focus:border-[#1D4ED8] focus:outline-none disabled:bg-[#F8FAFC] disabled:text-[#94A3B8]"
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-2 text-[10px] text-[#94A3B8]"
+                      >
+                        px
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Copy & Paste Size (works across separate components without duplicating) */}
+                <div className="flex items-center gap-1.5">
+                  {resizableElements.length === 1 && referenceRect && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCopiedSize({ width: referenceWidth, height: referenceHeight });
+                        setFeedback({
+                          type: 'info',
+                          message: `Ukuran ${referenceWidth} × ${referenceHeight} px disalin.`,
+                        });
+                      }}
+                      title={`Salin ukuran ${referenceWidth} × ${referenceHeight} px untuk diterapkan ke komponen lain`}
+                      className="flex-1 inline-flex items-center justify-center gap-1 rounded-md border border-[#E2E8F0] py-1.5 px-2 text-[11px] font-medium text-[#0F172A] hover:bg-[#F1F5F9]"
+                    >
+                      <Copy className="h-3 w-3 text-[#475569]" strokeWidth={1.75} aria-hidden="true" />
+                      <span>Salin Ukuran</span>
+                    </button>
+                  )}
+                  {copiedSize && (
+                    <button
+                      type="button"
+                      disabled={allResizableLocked}
+                      onClick={() =>
+                        applyManualDimensions({
+                          width: copiedSize.width,
+                          height: copiedSize.height,
+                        })
+                      }
+                      title={`Terapkan ukuran tersalin (${copiedSize.width} × ${copiedSize.height} px)`}
+                      className="flex-1 inline-flex items-center justify-center gap-1 rounded-md border border-[#1D4ED8]/40 bg-[#EFF6FF] py-1.5 px-2 text-[11px] font-medium text-[#1D4ED8] hover:bg-[#DBEAFE] disabled:opacity-40"
+                    >
+                      <ClipboardPaste className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                      <span className="font-mono-tabular">
+                        Tempel ({copiedSize.width}×{copiedSize.height})
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Multi-select one-click size equalization */}
+                {resizableElements.length > 1 && referenceRect && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="block text-[11px] text-[#475569]">
+                      Samakan Ukuran (acuan:{' '}
+                      <strong className="font-mono-tabular text-[#0F172A]">
+                        {referenceWidth}×{referenceHeight}
+                      </strong>{' '}
+                      px)
+                    </span>
+                    <div className="grid grid-cols-3 gap-1">
+                      <button
+                        type="button"
+                        disabled={allResizableLocked}
+                        title={`Samakan lebar semua ke ${referenceWidth} px`}
+                        onClick={() => applyManualDimensions({ width: referenceWidth })}
+                        className="py-1.5 rounded-md border border-[#E2E8F0] text-[11px] font-medium text-[#0F172A] hover:bg-[#F1F5F9] disabled:opacity-40"
+                      >
+                        Samakan L
+                      </button>
+                      <button
+                        type="button"
+                        disabled={allResizableLocked}
+                        title={`Samakan tinggi semua ke ${referenceHeight} px`}
+                        onClick={() => applyManualDimensions({ height: referenceHeight })}
+                        className="py-1.5 rounded-md border border-[#E2E8F0] text-[11px] font-medium text-[#0F172A] hover:bg-[#F1F5F9] disabled:opacity-40"
+                      >
+                        Samakan T
+                      </button>
+                      <button
+                        type="button"
+                        disabled={allResizableLocked}
+                        title={`Samakan lebar & tinggi semua ke ${referenceWidth} × ${referenceHeight} px`}
+                        onClick={() =>
+                          applyManualDimensions({
+                            width: referenceWidth,
+                            height: referenceHeight,
+                          })
+                        }
+                        className="py-1.5 rounded-md border border-[#1D4ED8]/40 bg-[#EFF6FF] text-[11px] font-medium text-[#1D4ED8] hover:bg-[#DBEAFE] disabled:opacity-40"
+                      >
+                        Samakan L & T
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
             )}
 
             {/* Single-element Label & Code */}
