@@ -7,6 +7,8 @@ import { buildSvgMarker } from './markers.js';
 import { getNormalizedRect } from './ports.js';
 import { computeConnectorPath } from './router.js';
 import {
+  drawChalkElementsLayer,
+  drawChalkboardBackground,
   drawConnectorElement,
   drawConnectorLabel,
   drawFreehandElement,
@@ -79,7 +81,13 @@ export async function exportToPngBlob(elements, options = {}) {
   }
 
   ctx.scale(scale, scale);
-  if (options.background && options.background !== 'transparent') {
+  const isChalkboard =
+    options.background === '#2D603D' ||
+    options.background === '#1B3429' ||
+    options.background === '#1D352A';
+  if (isChalkboard) {
+    drawChalkboardBackground(ctx, bounds.width, bounds.height);
+  } else if (options.background && options.background !== 'transparent') {
     ctx.fillStyle = options.background;
     ctx.fillRect(0, 0, bounds.width, bounds.height);
   }
@@ -88,22 +96,35 @@ export async function exportToPngBlob(elements, options = {}) {
   const rc = rough.canvas(canvas);
   const elementsById = new Map(elements.map((e) => [e.id, e]));
 
-  for (const el of elements) {
-    if (el.type === 'connector') continue;
-    if (el.type === 'freehand') {
-      drawFreehandElement(ctx, el);
-    } else {
-      drawShapeElement(ctx, rc, el);
+  const renderedAsChalk =
+    isChalkboard &&
+    drawChalkElementsLayer(ctx, elements, {
+      widthPx: canvas.width,
+      heightPx: canvas.height,
+      transform: [scale, 0, 0, scale, -bounds.x * scale, -bounds.y * scale],
+      grainOriginX: -bounds.x * scale,
+      grainOriginY: -bounds.y * scale,
+      pixelRatio: scale,
+    });
+
+  if (!renderedAsChalk) {
+    for (const el of elements) {
+      if (el.type === 'connector') continue;
+      if (el.type === 'freehand') {
+        drawFreehandElement(ctx, el, isChalkboard);
+      } else {
+        drawShapeElement(ctx, rc, el);
+      }
     }
-  }
-  for (const el of elements) {
-    if (el.type === 'connector') {
-      drawConnectorElement(ctx, el, elementsById, rc, false);
+    for (const el of elements) {
+      if (el.type === 'connector') {
+        drawConnectorElement(ctx, el, elementsById, rc, false, isChalkboard);
+      }
     }
-  }
-  for (const el of elements) {
-    if (el.type === 'connector') {
-      drawConnectorLabel(ctx, el, elementsById);
+    for (const el of elements) {
+      if (el.type === 'connector') {
+        drawConnectorLabel(ctx, el, elementsById, isChalkboard);
+      }
     }
   }
 

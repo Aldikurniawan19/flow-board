@@ -1,5 +1,6 @@
 export const UI_TOKENS = {
   bgCanvas: '#F8FAFC',
+  bgChalkboard: '#2D603D',
   bgSurface: '#FFFFFF',
   bgSubtle: '#F1F5F9',
   borderDefault: '#E2E8F0',
