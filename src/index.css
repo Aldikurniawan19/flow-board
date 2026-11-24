@@ -33,3 +33,40 @@ body,
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   font-variant-numeric: tabular-nums;
 }
+
+@keyframes auth-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes auth-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-auth-slide-right {
+  animation: auth-slide-in-right 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-auth-slide-left {
+  animation: auth-slide-in-left 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-auth-slide-right,
+  .animate-auth-slide-left {
+    animation: none;
+  }
+}

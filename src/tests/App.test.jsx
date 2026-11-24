@@ -39,6 +39,13 @@ describe('FlowBoard UI integration', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'FlowBoard' })).toBeInTheDocument();
+    expect(screen.getByText(/Aldi Kurniawan/i)).toBeInTheDocument();
+
+    // Switching between Login and Register tabs works cleanly
+    await user.click(screen.getByRole('tab', { name: 'Daftar Akun' }));
+    expect(screen.getByLabelText('Nama Lengkap')).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Masuk' }));
+    expect(screen.queryByLabelText('Nama Lengkap')).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Alamat Email'), 'test@example.com');
     const pwdInput = screen.getByLabelText('Kata Sandi');
