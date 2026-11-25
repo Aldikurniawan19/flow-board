@@ -68,4 +68,25 @@ export const apiClient = {
   deleteBoard(id) {
     return requestJson(`/api/boards/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
+  listApiKeys() {
+    return requestJson('/api/keys', { method: 'GET' });
+  },
+  createApiKey(name) {
+    return requestJson('/api/keys', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  },
+  deleteApiKey(id) {
+    return requestJson(`/api/keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  getPublicDraft(id) {
+    return requestJson(`/api/public/drafts/${encodeURIComponent(id)}`, { method: 'GET' });
+  },
+  createPublicDraft(data) {
+    return requestJson('/api/public/drafts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
 };

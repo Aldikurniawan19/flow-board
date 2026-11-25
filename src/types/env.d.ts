@@ -65,6 +65,8 @@ declare module 'express' {
   }
   export interface Request {
     method: string;
+    path: string;
+    protocol: string;
     ip?: string;
     body: unknown;
     params: Record<string, string>;
@@ -75,6 +77,7 @@ declare module 'express' {
   export interface Response {
     status(code: number): Response;
     json(body: unknown): Response;
+    end(): Response;
     sendFile(filePath: string): void;
     setHeader(name: string, value: string): void;
     cookie(name: string, value: string, options?: CookieOptions): Response;
@@ -133,6 +136,7 @@ declare module 'pg' {
 declare module 'supertest' {
   interface SupertestRequest {
     set(headers: Record<string, string>): SupertestRequest;
+    set(name: string, value: string): SupertestRequest;
     send(body: unknown): SupertestRequest;
     then: Promise<{ status: number; body: any; headers: Record<string, any> }>['then'];
   }

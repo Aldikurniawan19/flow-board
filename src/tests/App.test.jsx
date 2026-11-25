@@ -27,7 +27,11 @@ describe('FlowBoard UI integration', () => {
       future: [],
       copiedSize: null,
       theme: 'light',
+      guestPreviewMode: false,
+      pendingBoardId: null,
+      pendingDiagram: null,
     });
+    window.history.replaceState({}, '', '/');
   });
 
   afterEach(() => {
@@ -571,5 +575,69 @@ describe('FlowBoard UI integration', () => {
     syncedEls = useBoardStore.getState().elements;
     expect(syncedEls.find((e) => e.id === 'sync-p1')?.fillColor).toBe('#FEF3C7');
     expect(syncedEls.find((e) => e.id === 'sync-p2')?.fillColor).toBe('#DCFCE7');
+
+    // Open Integrasi AI & MCP modal, create and revoke an API key, and inspect Prompt tab
+    vi.spyOn(apiClient, 'listApiKeys').mockResolvedValue({ keys: [] });
+    vi.spyOn(apiClient, 'createApiKey').mockResolvedValue({
+      apiKey: {
+        id: 'key-1',
+        name: 'Claude Desktop',
+        keyPrefix: 'fbk_12345678',
+        createdAt: '2026-11-25T00:00:00.000Z',
+        lastUsedAt: null,
+      },
+      secret: 'fbk_1234567890abcdef1234567890abcdef1234567890abcdef',
+    });
+    vi.spyOn(apiClient, 'deleteApiKey').mockResolvedValue({ ok: true });
+
+    await user.click(screen.getByRole('button', { name: /Menu PlantText dan Ekspor Impor/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Integrasi AI & MCP/i }));
+    expect(screen.getByRole('heading', { name: 'Integrasi AI & MCP Server' })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Nama API Key'), 'Claude Desktop');
+    await user.click(screen.getByRole('button', { name: 'Buat Key' }));
+    expect(
+      await screen.findByText('fbk_1234567890abcdef1234567890abcdef1234567890abcdef'),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cabut API Key Claude Desktop' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Cabut API Key Claude Desktop' })).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('tab', { name: /Prompt & Tautan AI/i }));
+    expect(screen.getByRole('button', { name: 'Salin URL llms.txt' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Tutup dialog integrasi AI' }));
   }, 25000);
+
+  it('opens an AI deep-link diagram directly in guest preview mode without login wall', async () => {
+    vi.spyOn(apiClient, 'getMe').mockRejectedValue(new Error('Unauthorized'));
+
+    const plantCode = `@startuml
+entity "PELANGGAN" as p {
+  * id_pelanggan <<PK>>
+  --
+  * nama
+}
+entity "TRANSAKSI" as t {
+  * id_transaksi <<PK>>
+  --
+  * total
+}
+p "1" -- "N" t : "MELAKUKAN"
+@enduml`;
+
+    const qs = new URLSearchParams({
+      kind: 'erd_chen',
+      title: 'ERD Rental AI',
+      code: plantCode,
+    });
+    window.history.replaceState({}, '', `/?${qs.toString()}`);
+
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Masuk & Simpan' })).toBeInTheDocument();
+    expect(useBoardStore.getState().guestPreviewMode).toBe(true);
+    expect(useBoardStore.getState().boardTitle).toBe('ERD Rental AI');
+    expect(useBoardStore.getState().elements.some((e) => e.type === 'erd_chen_entity')).toBe(true);
+    expect(useBoardStore.getState().elements.some((e) => e.type === 'erd_chen_relation')).toBe(true);
+    expect(useBoardStore.getState().elements.some((e) => e.type === 'erd_chen_key_attr')).toBe(true);
+  });
 });

@@ -4,7 +4,16 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import { createAuthRouter } from './routes/auth.js';
 import { createBoardsRouter } from './routes/boards.js';
-import { applySecurityHeaders, requireCsrfHeader } from './middleware/security.js';
+import { createApiKeysRouter } from './routes/apiKeys.js';
+import { createPublicDraftsRouter } from './routes/publicDrafts.js';
+import { buildOpenApiSpec, createExternalApiRouter } from './routes/externalApi.js';
+import { createMcpRouter } from './routes/mcp.js';
+import { resolveBaseUrl } from './services/diagramService.js';
+import {
+  applyExternalApiCors,
+  applySecurityHeaders,
+  requireCsrfHeader,
+} from './middleware/security.js';
 
 /**
  * Create configured Express application.
@@ -28,9 +37,17 @@ export function createApp({ db, enableRateLimit = true, serveStatic = true }) {
     }
   });
 
+  app.get('/api/openapi.json', applyExternalApiCors, (req, res) => {
+    return res.status(200).json(buildOpenApiSpec(resolveBaseUrl(req)));
+  });
+
   app.use('/api', requireCsrfHeader);
   app.use('/api/auth', createAuthRouter(db, { enableRateLimit }));
   app.use('/api/boards', createBoardsRouter(db));
+  app.use('/api/keys', createApiKeysRouter(db));
+  app.use('/api/public', createPublicDraftsRouter(db, { enableRateLimit }));
+  app.use('/api/v1', createExternalApiRouter(db, { enableRateLimit }));
+  app.use('/api/mcp', createMcpRouter(db, { enableRateLimit }));
 
   if (serveStatic) {
     const distDir = path.resolve(process.cwd(), 'dist');

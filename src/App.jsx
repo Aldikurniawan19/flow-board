@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+import { AiIntegrationModal } from './components/AiIntegrationModal.jsx';
 import { AuthScreen } from './components/AuthScreen.jsx';
 import { EmptyCanvasOverlay } from './components/EmptyCanvasOverlay.jsx';
 import { ExportImportModal } from './components/ExportImportModal.jsx';
@@ -22,8 +23,10 @@ export function App() {
   );
   const [exportOpen, setExportOpen] = useState(false);
   const [plantTextOpen, setPlantTextOpen] = useState(false);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
 
   const authStatus = useBoardStore((s) => s.authStatus);
+  const guestPreviewMode = useBoardStore((s) => s.guestPreviewMode);
   const theme = useBoardStore((s) => s.theme);
   const boardLoadState = useBoardStore((s) => s.boardLoadState);
   const boardLoadError = useBoardStore((s) => s.boardLoadError);
@@ -40,7 +43,7 @@ export function App() {
   }, [bootstrapAuth]);
 
   useEffect(() => {
-    if (authStatus !== 'authenticated') return undefined;
+    if (authStatus !== 'authenticated' && !guestPreviewMode) return undefined;
 
     /** @param {KeyboardEvent} e */
     function handleAppShortcuts(e) {
@@ -51,6 +54,7 @@ export function App() {
         e.preventDefault();
         useBoardStore.getState().saveActiveBoard();
         setPlantTextOpen(false);
+        setAiModalOpen(false);
         setExportOpen(true);
         return;
       }
@@ -59,7 +63,7 @@ export function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (mod || e.altKey) return;
 
-      if (e.key === 'Tab' && !exportOpen && !plantTextOpen) {
+      if (e.key === 'Tab' && !exportOpen && !plantTextOpen && !aiModalOpen) {
         const store = useBoardStore.getState();
         if (!store.editingId && store.boards.length > 1) {
           e.preventDefault();
@@ -68,9 +72,16 @@ export function App() {
         return;
       }
 
-      if (e.key.toLowerCase() === 'n' && !e.shiftKey && !e.repeat && !exportOpen && !plantTextOpen) {
+      if (
+        e.key.toLowerCase() === 'n' &&
+        !e.shiftKey &&
+        !e.repeat &&
+        !exportOpen &&
+        !plantTextOpen &&
+        !aiModalOpen
+      ) {
         const store = useBoardStore.getState();
-        if (!store.editingId && store.boardLoadState !== 'loading') {
+        if (!store.editingId && store.user && store.boardLoadState !== 'loading') {
           e.preventDefault();
           store.createNewBoard('');
         }
@@ -95,7 +106,7 @@ export function App() {
 
     window.addEventListener('keydown', handleAppShortcuts);
     return () => window.removeEventListener('keydown', handleAppShortcuts);
-  }, [authStatus, exportOpen, plantTextOpen]);
+  }, [authStatus, guestPreviewMode, exportOpen, plantTextOpen, aiModalOpen]);
 
   if (authStatus === 'loading') {
     return (
@@ -106,7 +117,7 @@ export function App() {
     );
   }
 
-  if (authStatus === 'unauthenticated') {
+  if (authStatus === 'unauthenticated' && !guestPreviewMode) {
     return <AuthScreen />;
   }
 
@@ -115,6 +126,7 @@ export function App() {
       <HeaderBar
         onOpenExport={() => setExportOpen(true)}
         onOpenPlantText={() => setPlantTextOpen(true)}
+        onOpenAiIntegration={() => setAiModalOpen(true)}
       />
 
       <div className="flex-1 min-h-0 flex relative overflow-hidden">
@@ -162,6 +174,7 @@ export function App() {
 
       <ExportImportModal open={exportOpen} onClose={() => setExportOpen(false)} />
       <PlantTextModal open={plantTextOpen} onClose={() => setPlantTextOpen(false)} />
+      <AiIntegrationModal open={aiModalOpen} onClose={() => setAiModalOpen(false)} />
       <FeedbackBanner />
     </div>
   );

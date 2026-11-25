@@ -3,6 +3,8 @@ import { create } from 'zustand';
 import { clampZoom } from '../engine/camera.js';
 import { computeSceneBounds } from '../engine/exporter.js';
 import { layoutDiagramElements } from '../engine/autoLayout.js';
+import { parsePlantText } from '../engine/plantTextParser.js';
+import { parseIncomingDiagramLink } from '../utils/diagramLink.js';
 import { apiClient } from './apiClient.js';
 
 /**
@@ -112,6 +114,11 @@ export const useBoardStore = create((set, get) => ({
   /** @type {'loading' | 'authenticated' | 'unauthenticated'} */
   authStatus: 'loading',
   authError: '',
+  guestPreviewMode: false,
+  /** @type {string | null} */
+  pendingBoardId: null,
+  /** @type {{ title: string, elements: import('../types/schema.js').BoardElement[], renderMode: 'clean' | 'sketch', kindLabel: string } | null} */
+  pendingDiagram: null,
 
   // Boards workspace state
   /** @type {Array<{ id: string, title: string, createdAt: string, updatedAt: string }>} */
@@ -232,6 +239,7 @@ export const useBoardStore = create((set, get) => ({
   setCopiedSize: (copiedSize) => set({ copiedSize }),
 
   scheduleAutosave: () => {
+    if (!get().user || get().guestPreviewMode) return;
     set({ saveStatus: 'dirty' });
     if (autosaveTimer) clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => {
@@ -239,29 +247,184 @@ export const useBoardStore = create((set, get) => ({
     }, 900);
   },
 
+  enterAuthFromGuest: () => {
+    const { boardTitle, elements, settings } = get();
+    set({
+      guestPreviewMode: false,
+      pendingDiagram:
+        elements.length > 0
+          ? {
+              title: boardTitle.trim() || 'Diagram Tautan AI',
+              elements,
+              renderMode: settings.renderMode === 'sketch' ? 'sketch' : 'clean',
+              kindLabel: 'Diagram Tautan AI',
+            }
+          : null,
+    });
+  },
+
+  importDiagramAsNewBoard: async (diagram) => {
+    try {
+      const settings = { ...DEFAULT_SETTINGS, renderMode: diagram.renderMode || 'clean' };
+      const { board } = await apiClient.createBoard({
+        title: diagram.title || 'Diagram AI',
+        settings,
+        elements: diagram.elements,
+      });
+      set((state) => ({
+        boards: [
+          {
+            id: board.id,
+            title: board.title,
+            createdAt: board.createdAt,
+            updatedAt: board.updatedAt,
+          },
+          ...state.boards.filter((b) => b.id !== board.id),
+        ],
+        activeBoardId: board.id,
+        boardTitle: board.title,
+        elements: board.elements || diagram.elements,
+        settings: board.settings || settings,
+        selectedIds: [],
+        editingId: null,
+        past: [],
+        future: [],
+        saveStatus: 'saved',
+        pendingDiagram: null,
+        guestPreviewMode: false,
+        camera: computeFitCamera(board.elements || diagram.elements),
+        feedback: {
+          type: 'success',
+          message: `Diagram "${board.title}" berhasil dimuat dari tautan AI.`,
+        },
+      }));
+    } catch (err) {
+      set({
+        feedback: {
+          type: 'error',
+          message: err?.message || 'Gagal menyimpan diagram dari tautan AI.',
+        },
+      });
+    }
+  },
+
   bootstrapAuth: async () => {
     set({ authStatus: 'loading', authError: '' });
+
+    /** @type {{ title: string, elements: import('../types/schema.js').BoardElement[], renderMode: 'clean' | 'sketch', kindLabel: string } | null} */
+    let incomingDiagram = null;
+    /** @type {string | null} */
+    let incomingBoardId = null;
+    let incomingError = '';
+
+    if (typeof window !== 'undefined') {
+      const link = parseIncomingDiagramLink(window.location.search, window.location.hash);
+      if (link) {
+        if (link.type === 'board') {
+          incomingBoardId = link.boardId;
+        } else if (link.type === 'planttext') {
+          const parsed = parsePlantText(link.code, {
+            kind: link.kind,
+            renderMode: link.renderMode,
+          });
+          if (parsed.ok) {
+            incomingDiagram = {
+              title: link.title || parsed.kindLabel,
+              elements: parsed.elements,
+              renderMode: link.renderMode,
+              kindLabel: parsed.kindLabel,
+            };
+          } else {
+            incomingError = parsed.error;
+          }
+        } else if (link.type === 'draft') {
+          try {
+            const { draft } = await apiClient.getPublicDraft(link.draftId);
+            incomingDiagram = {
+              title: draft.title || 'Draf Diagram AI',
+              elements: Array.isArray(draft.elements) ? draft.elements : [],
+              renderMode: 'clean',
+              kindLabel: draft.kind || 'Diagram',
+            };
+          } catch (err) {
+            incomingError =
+              /** @type {Error} */ (err)?.message ||
+              'Draf diagram dari tautan tidak ditemukan atau sudah kedaluwarsa.';
+          }
+        }
+
+        try {
+          window.history.replaceState({}, '', window.location.pathname || '/');
+        } catch {
+          // Ignore history API restrictions in non-browser test runners
+        }
+      }
+    }
+
     try {
       const { user } = await apiClient.getMe();
-      set({ user, authStatus: 'authenticated' });
-      await get().loadBoards();
+      set({ user, authStatus: 'authenticated', guestPreviewMode: false });
+      await get().loadBoards(incomingBoardId || undefined);
+      if (incomingDiagram) {
+        await get().importDiagramAsNewBoard(incomingDiagram);
+      } else if (incomingError) {
+        set({ feedback: { type: 'error', message: incomingError } });
+      }
     } catch {
-      set({ user: null, authStatus: 'unauthenticated' });
+      if (incomingDiagram) {
+        set({
+          user: null,
+          authStatus: 'unauthenticated',
+          guestPreviewMode: true,
+          pendingDiagram: incomingDiagram,
+          pendingBoardId: null,
+          activeBoardId: null,
+          boardTitle: incomingDiagram.title,
+          elements: incomingDiagram.elements,
+          settings: { ...DEFAULT_SETTINGS, renderMode: incomingDiagram.renderMode },
+          camera: computeFitCamera(incomingDiagram.elements),
+          selectedIds: [],
+          past: [],
+          future: [],
+          feedback: {
+            type: 'info',
+            message: `Mode pratinjau: "${incomingDiagram.title}" siap diedit & diekspor. Masuk untuk menyimpannya ke akun Anda.`,
+          },
+        });
+      } else {
+        set({
+          user: null,
+          authStatus: 'unauthenticated',
+          guestPreviewMode: false,
+          pendingBoardId: incomingBoardId,
+          feedback: incomingError ? { type: 'error', message: incomingError } : null,
+        });
+      }
     }
   },
 
   login: async (email, password) => {
     set({ authError: '' });
+    const { pendingDiagram, pendingBoardId } = get();
     const { user } = await apiClient.login({ email, password });
-    set({ user, authStatus: 'authenticated', authError: '' });
-    await get().loadBoards();
+    set({ user, authStatus: 'authenticated', authError: '', guestPreviewMode: false });
+    await get().loadBoards(pendingBoardId || undefined);
+    set({ pendingBoardId: null });
+    if (pendingDiagram) {
+      await get().importDiagramAsNewBoard(pendingDiagram);
+    }
   },
 
   register: async (name, email, password) => {
     set({ authError: '' });
+    const { pendingDiagram, pendingBoardId } = get();
     const { user } = await apiClient.register({ name, email, password });
-    set({ user, authStatus: 'authenticated', authError: '' });
-    await get().loadBoards();
+    set({ user, authStatus: 'authenticated', authError: '', guestPreviewMode: false });
+    await get().loadBoards(pendingBoardId || undefined);
+    set({ pendingBoardId: null });
+    if (pendingDiagram) {
+      await get().importDiagramAsNewBoard(pendingDiagram);
+    }
   },
 
   logout: async () => {
@@ -285,7 +448,7 @@ export const useBoardStore = create((set, get) => ({
     });
   },
 
-  loadBoards: async () => {
+  loadBoards: async (preferredBoardId) => {
     set({ boardLoadState: 'loading', boardLoadError: '' });
     try {
       const { boards } = await apiClient.listBoards();
@@ -314,7 +477,11 @@ export const useBoardStore = create((set, get) => ({
       }
 
       set({ boards });
-      await get().selectBoard(boards[0].id);
+      const target =
+        preferredBoardId && boards.some((b) => b.id === preferredBoardId)
+          ? preferredBoardId
+          : boards[0].id;
+      await get().selectBoard(target, { fitView: Boolean(preferredBoardId) });
     } catch (err) {
       set({
         boardLoadState: 'error',
@@ -323,7 +490,7 @@ export const useBoardStore = create((set, get) => ({
     }
   },
 
-  selectBoard: async (boardId) => {
+  selectBoard: async (boardId, options = {}) => {
     if (autosaveTimer) {
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
@@ -331,10 +498,11 @@ export const useBoardStore = create((set, get) => ({
     set({ boardLoadState: 'loading', boardLoadError: '' });
     try {
       const { board } = await apiClient.getBoard(boardId);
+      const nextElements = board.elements || [];
       set({
         activeBoardId: board.id,
         boardTitle: board.title,
-        elements: board.elements || [],
+        elements: nextElements,
         settings: board.settings || { ...DEFAULT_SETTINGS },
         boardLoadState: 'idle',
         saveStatus: 'saved',
@@ -342,7 +510,10 @@ export const useBoardStore = create((set, get) => ({
         editingId: null,
         past: [],
         future: [],
-        camera: { x: 0, y: 0, zoom: 1 },
+        camera:
+          options.fitView && nextElements.length > 0
+            ? computeFitCamera(nextElements)
+            : { x: 0, y: 0, zoom: 1 },
       });
     } catch (err) {
       set({

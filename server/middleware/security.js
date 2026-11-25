@@ -1,7 +1,8 @@
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
- * Require custom X-Requested-With header on state-changing requests to mitigate CSRF.
+ * Require custom X-Requested-With header on cookie-authenticated state-changing requests
+ * to mitigate CSRF. External Bearer/public AI endpoints manage their own auth & rate limits.
  * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
@@ -10,11 +11,37 @@ export function requireCsrfHeader(req, res, next) {
   if (!MUTATION_METHODS.has(req.method)) {
     return next();
   }
+  const path = req.path || '';
+  if (
+    path === '/mcp' ||
+    path.startsWith('/mcp/') ||
+    path.startsWith('/v1/') ||
+    path.startsWith('/public/')
+  ) {
+    return next();
+  }
   const headerVal = req.get('X-Requested-With');
   if (headerVal !== 'FlowBoard') {
     return res.status(403).json({
       error: 'Permintaan ditolak karena header keamanan tidak valid.',
     });
+  }
+  return next();
+}
+
+/**
+ * Apply permissive CORS headers exclusively for external AI/MCP/public endpoints
+ * (which never rely on browser cookies).
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+export function applyExternalApiCors(req, res, next) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
   }
   return next();
 }

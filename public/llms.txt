@@ -1,0 +1,135 @@
+# FlowBoard — Interactive Diagram Editor & AI Tool
+> Official App: https://flow-board-dun.vercel.app/
+> OpenAPI 3.1 Spec: https://flow-board-dun.vercel.app/api/openapi.json
+> Remote MCP Server (Streamable HTTP JSON-RPC 2.0): https://flow-board-dun.vercel.app/api/mcp
+
+FlowBoard is an interactive Excalidraw + Draw.io hybrid web application that turns PlantUML / PlantText code into editable, zero-overlap vector diagrams (exportable to PNG, SVG, and JSON).
+
+## Supported Diagram Standards (`kind`)
+- `auto`: Auto-detect notation from PlantUML code (default)
+- `dfd`: Data Flow Diagram (Gane & Sarson by default; Yourdon & DeMarco circles when `Yourdon` or `DeMarco` is mentioned in the title or source)
+- `erd`: Relational ERD with Crow's Foot cardinality (`||--o{`, `||--||`, `||--|{`) and PK/FK columns
+- `erd_chen`: Conceptual ERD (Peter Chen notation: rectangle entities, diamond relations with `1`/`N`/`M` labels, and outward oval attributes with underlined PKs)
+- `class`: UML Class Diagram (classes, interfaces, inheritance, composition, dependency)
+- `usecase`: UML Use Case Diagram (system boundary, actors, use cases, include/extend)
+- `sequence`: UML Sequence Diagram (lifelines, messages, activations, alt/opt/loop fragments)
+- `flowchart`: ISO Flowchart (terminators, processes, decisions, I/O)
+
+---
+
+## Method 1 (Works in ANY AI — Zero Setup): Instant Deep-Link URL
+When a user asks you to create a diagram using FlowBoard, construct a clickable Markdown link with URL-encoded query parameters:
+
+```
+https://flow-board-dun.vercel.app/?kind=<KIND>&title=<URL_ENCODED_TITLE>&code=<URL_ENCODED_PLANTUML>
+```
+
+Parameters:
+- `kind`: `auto`, `dfd`, `erd`, `erd_chen`, `class`, `usecase`, `sequence`, or `flowchart`
+- `title`: Human-readable diagram title (URL-encoded)
+- `code`: Complete `@startuml ... @enduml` PlantUML source (URL-encoded via standard percent-encoding, e.g. newline `%0A`, space `%20`, quotes `%22`)
+- `renderMode` (optional): `clean` (technical, default) or `sketch` (hand-drawn)
+
+Alternatively, if you have HTTP access, POST to `https://flow-board-dun.vercel.app/api/public/drafts` with JSON `{ "title": "...", "kind": "dfd", "code": "@startuml\n...\n@enduml" }` to get a short link `https://flow-board-dun.vercel.app/?draft=<id>` (valid 30 days, no API key required).
+
+When the user clicks the link, FlowBoard opens immediately with the fully rendered, editable diagram on the canvas (works both for logged-in users and guest preview).
+
+---
+
+## Method 2 (For AI Agents, Claude, Cursor, Antigravity, Custom GPT): Remote MCP & REST API
+- **MCP Endpoint:** `POST https://flow-board-dun.vercel.app/api/mcp`
+- **Authentication:** Optional `Authorization: Bearer fbk_...` header (user creates a personal API key inside FlowBoard via `Menu -> Integrasi AI & MCP`).
+  - With API Key: `generate_diagram` saves directly into the user's FlowBoard workspace and returns `boardUrl` (`https://flow-board-dun.vercel.app/?board=<id>`). Also unlocks `list_boards`, `get_board`, and `delete_board`.
+  - Without API Key: `generate_diagram` creates a shareable public draft URL (`https://flow-board-dun.vercel.app/?draft=<id>`).
+- **MCP Tools:** `generate_diagram`, `list_boards`, `get_board`, `delete_board`, `get_diagram_syntax_guide`
+- **REST Endpoints (OpenAPI):**
+  - `POST /api/v1/diagrams` (Bearer API key required)
+  - `GET /api/v1/boards` (Bearer API key required)
+  - `POST /api/public/drafts` (no auth required)
+  - `GET /api/v1/syntax-guide` (no auth required)
+
+---
+
+## PlantUML Syntax Cheat Sheet for Clean Zero-Overlap Diagrams
+
+### 1. DFD Level 1 (Yourdon-DeMarco or Gane-Sarson)
+Use `rectangle ... <<External>>`, `usecase "1.0\nName" ... <<Process>>`, and `database "D1 Name" ... <<DataStore>>`:
+```plantuml
+@startuml
+title DFD Level 1 - Sistem Pengiriman Barang (Yourdon-DeMarco)
+left to right direction
+
+rectangle "Pengirim" as E1 <<External>>
+rectangle "Penerima" as E2 <<External>>
+rectangle "Kurir" as E3 <<External>>
+
+usecase "1.0\nOrder &\nTarif" as P1 <<Process>>
+usecase "2.0\nPembayaran" as P2 <<Process>>
+usecase "3.0\nPengiriman &\nPelacakan" as P3 <<Process>>
+
+database "D1 Data Pelanggan" as D1 <<DataStore>>
+database "D2 Data Pengiriman" as D2 <<DataStore>>
+database "D3 Data Pembayaran" as D3 <<DataStore>>
+
+E1 --> P1 : Data paket & tujuan
+P1 --> D1 : Simpan pelanggan
+P1 --> D2 : Draft resi
+P1 --> E1 : Estimasi biaya
+E1 --> P2 : Bukti bayar
+P2 --> D3 : Catat pembayaran
+P2 --> D2 : Status lunas
+P2 --> P3 : Siap kirim
+E3 --> P3 : Update lokasi
+P3 --> D2 : Log tracking
+P3 --> E2 : Status & paket diterima
+@enduml
+```
+
+### 2. Relational ERD (Crow's Foot, `kind=erd`)
+```plantuml
+@startuml
+title ERD - Sistem Pengiriman Barang
+
+entity "PELANGGAN" as pelanggan {
+  * id_pelanggan : INT <<PK>>
+  --
+  * nama_lengkap : VARCHAR(100)
+  * no_telepon : VARCHAR(15)
+}
+
+entity "PENGIRIMAN" as pengiriman {
+  * no_resi : VARCHAR(20) <<PK>>
+  --
+  * id_pelanggan : INT <<FK>>
+  * berat_kg : DECIMAL(5,2)
+  * status : VARCHAR(30)
+}
+
+pelanggan ||--o{ pengiriman : "mengirim"
+@enduml
+```
+
+### 3. Conceptual ERD (Peter Chen, `kind=erd_chen`)
+Include `kind=erd_chen` (or put `Peter Chen` in the title). Supports both `"1" -- "N"` and Crow's Foot `||--o{`:
+```plantuml
+@startuml
+title ERD Konseptual (Peter Chen) - Penyewaan Kendaraan
+
+entity "PELANGGAN" as pelanggan {
+  * id_pelanggan <<PK>>
+  --
+  * nama_pelanggan
+  * email
+  * no_telepon
+}
+
+entity "TRANSAKSI" as transaksi {
+  * id_transaksi <<PK>>
+  --
+  * tanggal_mulai
+  * total_bayar
+}
+
+pelanggan "1" -- "N" transaksi : "MELAKUKAN"
+@enduml
+```
