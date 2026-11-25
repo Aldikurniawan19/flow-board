@@ -5,6 +5,73 @@ export const API_KEY_PREFIX = 'fbk_';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * Parse comma-separated server-only environment variable list.
+ * @param {string | undefined} raw
+ * @param {boolean} [lowercase]
+ * @returns {Set<string>}
+ */
+function parseEnvAllowlist(raw, lowercase = false) {
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(',')
+      .map((item) => (lowercase ? item.trim().toLowerCase() : item.trim()))
+      .filter(Boolean),
+  );
+}
+
+/**
+ * Resolve server-side user entitlement flags (never trusted from client input).
+ * Owner accounts are configured exclusively via server-side env vars:
+ * - `OWNER_EMAILS` (comma-separated emails)
+ * - `OWNER_USER_IDS` (comma-separated user UUIDs)
+ * @param {{ id: string, name: string, email: string, plan?: string | null, plan_expires_at?: string | null }} row
+ */
+export function buildAuthUser(row) {
+  const ownerEmails = parseEnvAllowlist(process.env.OWNER_EMAILS, true);
+  const ownerIds = parseEnvAllowlist(process.env.OWNER_USER_IDS, false);
+  const isOwner =
+    ownerIds.has(row.id) || ownerEmails.has(String(row.email || '').trim().toLowerCase());
+
+  const rawPlan = row.plan === 'pro' ? 'pro' : 'free';
+  const expiresMs = row.plan_expires_at ? new Date(row.plan_expires_at).getTime() : null;
+  const planActive =
+    rawPlan === 'pro' && (expiresMs === null || !Number.isFinite(expiresMs) || expiresMs > Date.now());
+  const effectivePlan = isOwner || planActive ? /** @type {const} */ ('pro') : /** @type {const} */ ('free');
+
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    plan: effectivePlan,
+    isOwner,
+    hasAiAccess: isOwner || planActive,
+  };
+}
+
+/**
+ * Express middleware that enforces Pro/Owner entitlement after authentication.
+ * Prevents free users from bypassing the UI paywall via direct API calls.
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+export function requireAiAccess(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Autentikasi diperlukan. Silakan masuk terlebih dahulu.',
+    });
+  }
+  if (!req.user.hasAiAccess) {
+    return res.status(403).json({
+      code: 'PRO_REQUIRED',
+      error: 'Fitur Integrasi AI, MCP Server, dan Tautan AI khusus untuk akun FlowBoard Pro.',
+    });
+  }
+  return next();
+}
+
+/**
  * Generate a cryptographically random personal API key and its SHA-256 hash.
  * Raw keys are returned only once at creation time and never persisted.
  * @returns {{ rawKey: string, keyPrefix: string, keyHash: string }}
@@ -32,16 +99,16 @@ export function extractBearerToken(req) {
  * Validate a personal API key against the database and return its owning user.
  * @param {import('../db.js').FlowBoardDb} db
  * @param {string} rawKey
- * @returns {Promise<{ user: { id: string, name: string, email: string }, keyId: string } | null>}
+ * @returns {Promise<{ user: { id: string, name: string, email: string, plan: 'free' | 'pro', isOwner: boolean, hasAiAccess: boolean }, keyId: string } | null>}
  */
 export async function authenticateApiKey(db, rawKey) {
   if (!rawKey || !rawKey.startsWith(API_KEY_PREFIX) || rawKey.length < 20) {
     return null;
   }
   const keyHash = hashSessionToken(rawKey);
-  const row = /** @type {{ key_id: string, id: string, name: string, email: string } | undefined} */ (
+  const row = /** @type {{ key_id: string, id: string, name: string, email: string, plan?: string, plan_expires_at?: string | null } | undefined} */ (
     await db.get(
-      `SELECT k.id AS key_id, u.id, u.name, u.email
+      `SELECT k.id AS key_id, u.id, u.name, u.email, u.plan, u.plan_expires_at
        FROM api_keys k
        JOIN users u ON u.id = k.user_id
        WHERE k.key_hash = ?`,
@@ -59,8 +126,37 @@ export async function authenticateApiKey(db, rawKey) {
 
   return {
     keyId: row.key_id,
-    user: { id: row.id, name: row.name, email: row.email },
+    user: buildAuthUser(row),
   };
+}
+
+/**
+ * Authenticate a browser session cookie and return the resolved user if valid.
+ * @param {import('../db.js').FlowBoardDb} db
+ * @param {import('express').Request} req
+ */
+export async function authenticateSessionCookie(db, req) {
+  const rawToken = req.cookies?.[SESSION_COOKIE_NAME];
+  if (!rawToken || typeof rawToken !== 'string') return null;
+
+  const tokenHash = hashSessionToken(rawToken);
+  const row = /** @type {{ id: string, name: string, email: string, plan?: string, plan_expires_at?: string | null, expires_at: string } | undefined} */ (
+    await db.get(
+      `SELECT u.id, u.name, u.email, u.plan, u.plan_expires_at, s.expires_at
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.token_hash = ?`,
+      [tokenHash],
+    )
+  );
+  if (!row) return null;
+
+  if (new Date(row.expires_at).getTime() <= Date.now()) {
+    await db.run('DELETE FROM sessions WHERE token_hash = ?', [tokenHash]);
+    return null;
+  }
+
+  return buildAuthUser(row);
 }
 
 /**
@@ -164,9 +260,9 @@ export function createRequireAuth(db) {
       }
 
       const tokenHash = hashSessionToken(rawToken);
-      const row = /** @type {{ id: string, name: string, email: string, expires_at: string } | undefined} */ (
+      const row = /** @type {{ id: string, name: string, email: string, plan?: string, plan_expires_at?: string | null, expires_at: string } | undefined} */ (
         await db.get(
-          `SELECT u.id, u.name, u.email, s.expires_at
+          `SELECT u.id, u.name, u.email, u.plan, u.plan_expires_at, s.expires_at
            FROM sessions s
            JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = ?`,
@@ -187,7 +283,7 @@ export function createRequireAuth(db) {
         });
       }
 
-      req.user = { id: row.id, name: row.name, email: row.email };
+      req.user = buildAuthUser(row);
       return next();
     } catch (err) {
       return next(err);

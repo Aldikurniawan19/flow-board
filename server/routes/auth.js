@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { LoginSchema, RegisterSchema } from '../../src/types/schema.js';
 import {
   SESSION_COOKIE_NAME,
+  buildAuthUser,
   createRequireAuth,
   createSession,
   deleteSession,
@@ -54,8 +55,8 @@ export function createAuthRouter(db, options = {}) {
       const now = new Date().toISOString();
 
       await db.run(
-        'INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
-        [userId, name, email, passwordHash, now],
+        'INSERT INTO users (id, name, email, password_hash, plan, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, name, email, passwordHash, 'free', now],
       );
 
       const firstBoardId = crypto.randomUUID();
@@ -69,7 +70,7 @@ export function createAuthRouter(db, options = {}) {
       res.cookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions());
 
       return res.status(201).json({
-        user: { id: userId, name, email },
+        user: buildAuthUser({ id: userId, name, email, plan: 'free', plan_expires_at: null }),
       });
     } catch (err) {
       return next(err);
@@ -86,9 +87,9 @@ export function createAuthRouter(db, options = {}) {
       }
 
       const { email, password } = parsed.data;
-      const user = /** @type {{ id: string, name: string, email: string, password_hash: string } | undefined} */ (
+      const user = /** @type {{ id: string, name: string, email: string, password_hash: string, plan?: string, plan_expires_at?: string | null } | undefined} */ (
         await db.get(
-          'SELECT id, name, email, password_hash FROM users WHERE email = ?',
+          'SELECT id, name, email, password_hash, plan, plan_expires_at FROM users WHERE email = ?',
           [email],
         )
       );
@@ -106,7 +107,7 @@ export function createAuthRouter(db, options = {}) {
       res.cookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions());
 
       return res.status(200).json({
-        user: { id: user.id, name: user.name, email: user.email },
+        user: buildAuthUser(user),
       });
     } catch (err) {
       return next(err);

@@ -513,7 +513,12 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
                     <Bot className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium text-[#0F172A]">Integrasi AI & MCP</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-[#0F172A] truncate">Integrasi AI & MCP</span>
+                      <span className="rounded-full bg-[#FEE2E2] px-1.5 py-0.5 text-[10px] font-semibold text-[#B91C1C] leading-none shrink-0">
+                        <span className="animate-hot-blink">Hot</span>
+                      </span>
+                    </div>
                     <div className="text-[11px] text-[#475569] truncate">Claude, ChatGPT, Cursor</div>
                   </div>
                 </button>

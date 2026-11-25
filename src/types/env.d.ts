@@ -3,6 +3,10 @@ declare var process: {
   cwd(): string;
 };
 
+interface ImportMeta {
+  readonly env?: Record<string, string | undefined>;
+}
+
 declare module 'node:fs' {
   export function existsSync(p: string): boolean;
   export function mkdirSync(p: string, options?: { recursive?: boolean }): void;
@@ -71,7 +75,14 @@ declare module 'express' {
     body: unknown;
     params: Record<string, string>;
     cookies?: Record<string, unknown>;
-    user?: { id: string; name: string; email: string };
+    user?: {
+      id: string;
+      name: string;
+      email: string;
+      plan?: 'free' | 'pro';
+      isOwner?: boolean;
+      hasAiAccess?: boolean;
+    };
     get(header: string): string | undefined;
   }
   export interface Response {

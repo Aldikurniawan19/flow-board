@@ -27,6 +27,8 @@ export function App() {
 
   const authStatus = useBoardStore((s) => s.authStatus);
   const guestPreviewMode = useBoardStore((s) => s.guestPreviewMode);
+  const aiUpgradeRequested = useBoardStore((s) => s.aiUpgradeRequested);
+  const clearAiUpgradeRequest = useBoardStore((s) => s.clearAiUpgradeRequest);
   const theme = useBoardStore((s) => s.theme);
   const boardLoadState = useBoardStore((s) => s.boardLoadState);
   const boardLoadError = useBoardStore((s) => s.boardLoadError);
@@ -41,6 +43,13 @@ export function App() {
   useEffect(() => {
     bootstrapAuth();
   }, [bootstrapAuth]);
+
+  useEffect(() => {
+    if (aiUpgradeRequested) {
+      setAiModalOpen(true);
+      clearAiUpgradeRequest();
+    }
+  }, [aiUpgradeRequested, clearAiUpgradeRequest]);
 
   useEffect(() => {
     if (authStatus !== 'authenticated' && !guestPreviewMode) return undefined;

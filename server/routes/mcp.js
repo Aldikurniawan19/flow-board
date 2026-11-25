@@ -3,10 +3,8 @@ import { z } from 'zod';
 import { authenticateApiKey, extractBearerToken } from '../middleware/auth.js';
 import { applyExternalApiCors, createRateLimiter } from '../middleware/security.js';
 import {
-  CreatePublicDraftSchema,
   DIAGRAM_KINDS,
   GenerateDiagramInputSchema,
-  createPublicDraft,
   generateDiagramForUser,
   getDiagramSyntaxGuide,
   resolveBaseUrl,
@@ -180,13 +178,22 @@ export function createMcpRouter(db, options = {}) {
       );
 
       const token = extractBearerToken(req);
-      /** @type {{ id: string, name: string, email: string } | null} */
+      /** @type {{ id: string, name: string, email: string, plan: 'free' | 'pro', isOwner: boolean, hasAiAccess: boolean } | null} */
       let authUser = null;
       if (token !== null) {
         const auth = await authenticateApiKey(db, token);
         if (!auth) {
           return res.status(401).json(
             rpcError(body?.id ?? null, -32001, 'API Key tidak valid atau telah dicabut.'),
+          );
+        }
+        if (!auth.user.hasAiAccess) {
+          return res.status(403).json(
+            rpcError(
+              body?.id ?? null,
+              -32003,
+              'Fitur Integrasi AI & MCP khusus untuk pelanggan FlowBoard Pro.',
+            ),
           );
         }
         authUser = auth.user;
@@ -239,63 +246,43 @@ export function createMcpRouter(db, options = {}) {
         }
 
         if (toolName === 'generate_diagram') {
-          if (authUser) {
-            const parsed = GenerateDiagramInputSchema.safeParse(args);
-            if (!parsed.success) {
-              return res.status(200).json(
-                rpcResult(
-                  id,
-                  toolContent(
-                    { error: parsed.error.issues[0]?.message || 'Argumen generate_diagram tidak valid.' },
-                    true,
-                  ),
-                ),
-              );
-            }
-            try {
-              const out = await generateDiagramForUser(db, authUser.id, parsed.data, baseUrl);
-              return res.status(200).json(
-                rpcResult(
-                  id,
-                  toolContent({
-                    ...out,
-                    storage: 'user_workspace',
-                    message: `Diagram "${out.title}" (${out.kindLabel}) berhasil dibuat di akun FlowBoard Anda. Buka: ${out.boardUrl}`,
-                  }),
-                ),
-              );
-            } catch (err) {
-              return res.status(200).json(
-                rpcResult(
-                  id,
-                  toolContent({ error: /** @type {Error} */ (err).message }, true),
-                ),
-              );
-            }
-          }
-
-          // Public draft fallback when no API key is attached
-          const parsedDraft = CreatePublicDraftSchema.safeParse(args);
-          if (!parsedDraft.success) {
+          if (!authUser || !authUser.hasAiAccess) {
             return res.status(200).json(
               rpcResult(
                 id,
                 toolContent(
-                  { error: parsedDraft.error.issues[0]?.message || 'Argumen generate_diagram tidak valid.' },
+                  {
+                    code: 'PRO_REQUIRED',
+                    error:
+                      'Fitur generate_diagram memerlukan API Key dari akun FlowBoard Pro (Authorization: Bearer fbk_...).',
+                  },
+                  true,
+                ),
+              ),
+            );
+          }
+
+          const parsed = GenerateDiagramInputSchema.safeParse(args);
+          if (!parsed.success) {
+            return res.status(200).json(
+              rpcResult(
+                id,
+                toolContent(
+                  { error: parsed.error.issues[0]?.message || 'Argumen generate_diagram tidak valid.' },
                   true,
                 ),
               ),
             );
           }
           try {
-            const out = await createPublicDraft(db, parsedDraft.data, baseUrl);
+            const out = await generateDiagramForUser(db, authUser.id, parsed.data, baseUrl);
             return res.status(200).json(
               rpcResult(
                 id,
                 toolContent({
                   ...out,
-                  storage: 'public_draft',
-                  message: `Draf diagram "${out.title}" (${out.kindLabel}) siap dibuka & diedit di FlowBoard: ${out.url}`,
+                  storage: 'user_workspace',
+                  message: `Diagram "${out.title}" (${out.kindLabel}) berhasil dibuat di akun FlowBoard Anda. Buka: ${out.boardUrl}`,
                 }),
               ),
             );

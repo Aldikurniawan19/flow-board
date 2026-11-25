@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { z } from 'zod';
-import { createRequireAuth, generateApiKey } from '../middleware/auth.js';
+import { createRequireAuth, generateApiKey, requireAiAccess } from '../middleware/auth.js';
 
 const MAX_KEYS_PER_USER = 10;
 
@@ -23,6 +23,7 @@ export function createApiKeysRouter(db) {
   const requireAuth = createRequireAuth(db);
 
   router.use(requireAuth);
+  router.use(requireAiAccess);
 
   router.get('/', async (req, res, next) => {
     try {

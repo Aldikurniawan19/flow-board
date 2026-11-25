@@ -1,4 +1,9 @@
 import express from 'express';
+import {
+  authenticateApiKey,
+  authenticateSessionCookie,
+  extractBearerToken,
+} from '../middleware/auth.js';
 import { applyExternalApiCors, createRateLimiter } from '../middleware/security.js';
 import {
   CreatePublicDraftSchema,
@@ -8,8 +13,8 @@ import {
 } from '../services/diagramService.js';
 
 /**
- * Create public diagram draft router (/api/public/*) so any AI or user can generate
- * a shareable interactive FlowBoard diagram URL without requiring account login.
+ * Create diagram draft router (/api/public/*) locked strictly to Pro / Owner accounts
+ * (via either Bearer API key or authenticated browser session cookie).
  * @param {import('../db.js').FlowBoardDb} db
  * @param {{ enableRateLimit?: boolean }} [options]
  */
@@ -23,7 +28,46 @@ export function createPublicDraftsRouter(db, options = {}) {
 
   router.use(applyExternalApiCors);
 
-  router.post('/drafts', draftRateLimit, async (req, res, next) => {
+  /**
+   * Resolve caller from Bearer API key or session cookie and enforce Pro/Owner access.
+   * @param {import('express').Request} req
+   * @param {import('express').Response} res
+   * @param {import('express').NextFunction} next
+   */
+  async function requireProCaller(req, res, next) {
+    try {
+      const bearer = extractBearerToken(req);
+      let user = null;
+      if (bearer !== null) {
+        const auth = await authenticateApiKey(db, bearer);
+        if (!auth) {
+          return res.status(401).json({ error: 'API Key tidak valid atau telah dicabut.' });
+        }
+        user = auth.user;
+      } else {
+        user = await authenticateSessionCookie(db, req);
+      }
+
+      if (!user) {
+        return res.status(401).json({
+          error: 'Tautan draf AI memerlukan akun FlowBoard Pro. Silakan masuk atau sertakan API Key.',
+        });
+      }
+      if (!user.hasAiAccess) {
+        return res.status(403).json({
+          code: 'PRO_REQUIRED',
+          error: 'Fitur Tautan AI & Draf Diagram khusus untuk pelanggan FlowBoard Pro.',
+        });
+      }
+
+      req.user = user;
+      return next();
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  router.post('/drafts', draftRateLimit, requireProCaller, async (req, res, next) => {
     try {
       const parsed = CreatePublicDraftSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -42,7 +86,7 @@ export function createPublicDraftsRouter(db, options = {}) {
     }
   });
 
-  router.get('/drafts/:id', async (req, res, next) => {
+  router.get('/drafts/:id', requireProCaller, async (req, res, next) => {
     try {
       const draftId = String(req.params.id || '').trim();
       if (!draftId || draftId.length > 64) {

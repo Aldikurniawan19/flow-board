@@ -1,18 +1,83 @@
 import { useEffect, useState } from 'react';
 import {
   AlertCircle,
+  ArrowLeft,
   Bot,
   Check,
   Copy,
+  Crown,
   KeyRound,
+  Layers,
   Link2,
   Loader2,
+  MessageCircle,
   Plus,
+  Sparkles,
   Trash2,
+  Wand2,
   X,
+  Zap,
 } from 'lucide-react';
 import { apiClient } from '../store/apiClient.js';
 import { useBoardStore } from '../store/useBoardStore.js';
+
+const PRO_PLANS = [
+  {
+    id: 'monthly',
+    name: 'Pro Bulanan',
+    price: 'Rp 29.000',
+    period: '/ bulan',
+    badge: '',
+    description: 'Fleksibel untuk tugas akhir, proyek kuliah, atau sprint desain cepat.',
+    perks: [
+      'Remote MCP Server untuk Claude, Cursor & Antigravity',
+      'API Key pribadi & OpenAPI Spec (ChatGPT Custom GPT)',
+      'Impor langsung dari Tautan AI (Deep-Link & Draf)',
+      'Generate DFD, ERD Crow Foot & Peter Chen anti-tumpuk',
+    ],
+  },
+  {
+    id: 'yearly',
+    name: 'Pro Tahunan',
+    price: 'Rp 249.000',
+    period: '/ tahun',
+    badge: 'Hemat 28%',
+    description: 'Setara Rp 20.750/bulan — paling hemat untuk pemakaian rutin.',
+    perks: [
+      'Semua fitur Pro Bulanan tanpa batas generate',
+      'Prioritas pembaruan notasi & layout AI terbaru',
+      'Aktivasi cepat langsung untuk akun Anda',
+      'Dukungan prioritas via WhatsApp Admin',
+    ],
+  },
+];
+
+const UPGRADE_HIGHLIGHTS = [
+  {
+    icon: Wand2,
+    title: 'Langsung Jadi dari Prompt AI',
+    description:
+      'Cukup ketik permintaan di ChatGPT, Claude, Cursor, atau Antigravity — diagram otomatis tersusun di papan FlowBoard Anda tanpa gambar manual dari nol.',
+  },
+  {
+    icon: Layers,
+    title: 'Jauh Lebih Akurat & Sesuai Standar',
+    description:
+      'Mendukung notasi DFD (Gane-Sarson & Yourdon), ERD Relasional (Crow Foot), ERD Konseptual (Peter Chen), UML Class, Use Case, Sequence, hingga Flowchart.',
+  },
+  {
+    icon: Zap,
+    title: 'Layout Rapi Anti-Tumpuk & 100% Editabel',
+    description:
+      'Bukan gambar statis. Setiap komponen, atribut, dan garis relasi dapat digeser, diubah ukurannya (otomatis menyesuaikan jalur), serta diekspor ke PNG/SVG/JSON.',
+  },
+  {
+    icon: Link2,
+    title: 'Akses MCP Server, API Key & Tautan AI',
+    description:
+      'Buka kunci API Key pribadi, integrasi Remote MCP, Custom GPT Actions, serta impor instan lewat Tautan Deep-Link AI.',
+  },
+];
 
 /**
  * Format ISO timestamp into concise Indonesian date string.
@@ -32,12 +97,31 @@ function formatDate(iso) {
 }
 
 /**
- * Modal for connecting external AI assistants (Claude, ChatGPT, Cursor, Antigravity, Gemini)
- * via Remote MCP Server + API Keys (Cara 1) and Deep-Link / llms.txt prompts (Cara 2).
+ * Resolve configured admin WhatsApp number from build env (digits only).
+ * Set `VITE_ADMIN_WHATSAPP=628xxxxxxxxxx` in Vercel Environment Variables.
+ */
+function getAdminWhatsAppNumber() {
+  const raw =
+    typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_WHATSAPP
+      ? String(import.meta.env.VITE_ADMIN_WHATSAPP)
+      : '6281234567890';
+  const digits = raw.replace(/\D/g, '');
+  return digits || '6281234567890';
+}
+
+/**
+ * Modal for Integrasi AI & MCP:
+ * - For Owner / Pro subscribers (`user.hasAiAccess === true`): full MCP Server, API Keys, OpenAPI, & Prompt tools.
+ * - For Free accounts (`user.hasAiAccess !== true`): persuasive Pro pitch -> Pricing selector -> WhatsApp Admin CTA.
  * @param {{ open: boolean, onClose: () => void }} props
  */
 export function AiIntegrationModal({ open, onClose }) {
   const user = useBoardStore((s) => s.user);
+  const hasAiAccess = Boolean(user?.hasAiAccess);
+
+  const [paywallStep, setPaywallStep] = useState(/** @type {'pitch' | 'pricing'} */ ('pitch'));
+  const [selectedPlanId, setSelectedPlanId] = useState('yearly');
+
   const [activeTab, setActiveTab] = useState(/** @type {'mcp' | 'prompt'} */ ('mcp'));
   const [keys, setKeys] = useState(
     /** @type {Array<{ id: string, name: string, keyPrefix: string, createdAt: string, lastUsedAt: string | null }>} */ ([]),
@@ -77,7 +161,7 @@ export function AiIntegrationModal({ open, onClose }) {
   const samplePromptErd = `Baca panduan tool di ${llmsTxtUrl} lalu buatkan ERD Konseptual (Peter Chen) sistem penyewaan kendaraan lengkap dengan atribut oval dan kardinalitas 1/N. Berikan tautan Markdown yang bisa langsung diklik (format [Buka Diagram di FlowBoard](url)) agar langsung terbuka di FlowBoard.`;
 
   useEffect(() => {
-    if (!open || !user) return;
+    if (!open || !user || !hasAiAccess) return;
     let cancelled = false;
     setLoadingKeys(true);
     setError('');
@@ -95,17 +179,23 @@ export function AiIntegrationModal({ open, onClose }) {
     return () => {
       cancelled = true;
     };
-  }, [open, user]);
+  }, [open, user, hasAiAccess]);
 
   useEffect(() => {
     if (!open) {
       setNewSecret('');
       setError('');
       setKeyName('');
+      setPaywallStep('pitch');
     }
   }, [open]);
 
   if (!open) return null;
+
+  const selectedPlan = PRO_PLANS.find((p) => p.id === selectedPlanId) || PRO_PLANS[1];
+  const waNumber = getAdminWhatsAppNumber();
+  const waMessage = `Halo Admin FlowBoard, saya ingin berlangganan paket *${selectedPlan.name}* (${selectedPlan.price} ${selectedPlan.period}) untuk mengaktifkan fitur Integrasi AI, MCP Server & Tautan AI.\n\nEmail akun FlowBoard saya: ${user?.email || '-'}`;
+  const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(waMessage)}`;
 
   /**
    * @param {string} id
@@ -156,6 +246,198 @@ export function AiIntegrationModal({ open, onClose }) {
     }
   }
 
+  // Paywall View for Free / Non-Pro users
+  if (!hasAiAccess) {
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ai-integration-modal-title"
+        onClick={onClose}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F172A]/40 p-4"
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="w-full max-w-xl max-h-[90vh] flex flex-col rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] shadow-sm overflow-hidden"
+        >
+          {/* Header */}
+          <div className="px-5 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-lg bg-[#FEE2E2] text-[#B91C1C] flex items-center justify-center shrink-0">
+                <Crown className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 id="ai-integration-modal-title" className="text-sm font-semibold text-[#0F172A]">
+                    {paywallStep === 'pitch'
+                      ? 'Integrasi AI & MCP — FlowBoard Pro'
+                      : 'Pilih Paket FlowBoard Pro'}
+                  </h2>
+                  <span className="rounded-full bg-[#FEE2E2] px-1.5 py-0.5 text-[10px] font-semibold text-[#B91C1C] leading-none">
+                    Pro
+                  </span>
+                </div>
+                <p className="text-xs text-[#475569]">
+                  {paywallStep === 'pitch'
+                    ? 'Rancang diagram sistem jauh lebih praktis, cepat, dan akurat langsung dari AI.'
+                    : 'Aktivasi instan melalui Admin WhatsApp untuk akun FlowBoard Anda.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Tutup dialog integrasi AI"
+              className="p-1.5 rounded-lg text-[#475569] hover:bg-[#F1F5F9]"
+            >
+              <X className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+            {paywallStep === 'pitch' ? (
+              <>
+                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 space-y-1.5">
+                  <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#1D4ED8]">
+                    <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                    <span>Hemat Berjam-jam Kerja Manual</span>
+                  </div>
+                  <h3 className="text-sm font-semibold text-[#0F172A] leading-snug">
+                    Buat DFD, ERD Relasional, ERD Peter Chen & UML 10× Lebih Cepat Langsung dari AI
+                  </h3>
+                  <p className="text-xs text-[#475569] leading-relaxed">
+                    Daripada menyusun kotak, atribut oval, dan panah relasi satu per satu secara manual, cukup beri prompt ke AI favorit Anda — FlowBoard otomatis menyusunnya rapi, akurat sesuai standar, dan langsung siap diedit di kanvas.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {UPGRADE_HIGHLIGHTS.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <div
+                        key={item.title}
+                        className="rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] p-3 space-y-1.5"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="h-6 w-6 rounded-md bg-[#DBEAFE] text-[#1D4ED8] flex items-center justify-center shrink-0">
+                            <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                          </div>
+                          <span className="font-semibold text-[#0F172A]">{item.title}</span>
+                        </div>
+                        <p className="text-[11px] text-[#475569] leading-relaxed">
+                          {item.description}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setPaywallStep('pitch')}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-[#475569] hover:text-[#1D4ED8]"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  <span>Kembali ke Ringkasan Fitur</span>
+                </button>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {PRO_PLANS.map((plan) => {
+                    const isSelected = plan.id === selectedPlan.id;
+                    return (
+                      <button
+                        key={plan.id}
+                        type="button"
+                        onClick={() => setSelectedPlanId(plan.id)}
+                        className={`text-left rounded-xl border p-4 transition-colors space-y-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+                          isSelected
+                            ? 'border-[#1D4ED8] bg-[#DBEAFE]/40'
+                            : 'border-[#E2E8F0] bg-[#FFFFFF] hover:bg-[#F8FAFC]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-[#0F172A]">{plan.name}</span>
+                          {plan.badge ? (
+                            <span className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-semibold text-[#15803D]">
+                              {plan.badge}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-lg font-bold text-[#0F172A] font-mono-tabular">
+                            {plan.price}
+                          </span>
+                          <span className="text-[11px] text-[#475569]">{plan.period}</span>
+                        </div>
+
+                        <p className="text-[11px] text-[#475569] leading-relaxed">
+                          {plan.description}
+                        </p>
+
+                        <ul className="space-y-1.5 pt-1 border-t border-[#E2E8F0]">
+                          {plan.perks.map((perk) => (
+                            <li key={perk} className="flex items-start gap-1.5 text-[11px] text-[#0F172A]">
+                              <Check
+                                className="h-3.5 w-3.5 text-[#15803D] shrink-0 mt-0.5"
+                                strokeWidth={2}
+                                aria-hidden="true"
+                              />
+                              <span>{perk}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3 text-[11px] text-[#475569] leading-relaxed">
+                  Klik tombol di bawah untuk menghubungi <strong className="text-[#0F172A]">Admin via WhatsApp</strong> dengan pesan otomatis berisi paket pilihan (<strong className="text-[#0F172A]">{selectedPlan.name}</strong>) dan email akun Anda (<code className="font-mono-tabular text-[#0F172A]">{user?.email || '-'}</code>).
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="px-5 py-3 border-t border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3.5 py-2 text-xs font-medium text-[#475569] hover:bg-[#F1F5F9]"
+            >
+              {paywallStep === 'pitch' ? 'Nanti Saja' : 'Tutup'}
+            </button>
+            {paywallStep === 'pitch' ? (
+              <button
+                type="button"
+                onClick={() => setPaywallStep('pricing')}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-4 py-2 text-xs font-medium text-white hover:bg-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+              >
+                <Crown className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                <span>Berlangganan Pro</span>
+              </button>
+            ) : (
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#15803D] px-4 py-2 text-xs font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#15803D]"
+              >
+                <MessageCircle className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                <span>Hubungi Admin via WhatsApp</span>
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Full Access View for Owner / Pro subscribers
   return (
     <div
       role="dialog"
@@ -175,9 +457,14 @@ export function AiIntegrationModal({ open, onClose }) {
               <Bot className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
             </div>
             <div>
-              <h2 id="ai-integration-modal-title" className="text-sm font-semibold text-[#0F172A]">
-                Integrasi AI & MCP Server
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 id="ai-integration-modal-title" className="text-sm font-semibold text-[#0F172A]">
+                  Integrasi AI & MCP Server
+                </h2>
+                <span className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-semibold text-[#15803D] leading-none">
+                  {user?.isOwner ? 'Owner' : 'Pro Aktif'}
+                </span>
+              </div>
               <p className="text-xs text-[#475569]">
                 Hubungkan Claude, ChatGPT, Cursor, Gemini, atau AI lain agar bisa langsung membuat diagram di FlowBoard.
               </p>
@@ -221,7 +508,7 @@ export function AiIntegrationModal({ open, onClose }) {
             }`}
           >
             <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
-            <span>Prompt & Tautan AI (Tanpa Setup)</span>
+            <span>Prompt & Tautan AI</span>
           </button>
         </div>
 
@@ -293,110 +580,102 @@ export function AiIntegrationModal({ open, onClose }) {
                   </p>
                 </div>
 
-                {!user ? (
-                  <p className="text-[11px] text-[#475569] rounded-md bg-[#F8FAFC] border border-[#E2E8F0] p-2.5">
-                    Masuk ke akun FlowBoard terlebih dahulu untuk membuat API Key pribadi. Tanpa API Key, endpoint MCP tetap bisa membuat draf publik sementara.
+                <form onSubmit={handleCreateKey} className="flex items-center gap-2">
+                  <label htmlFor="api-key-name-input" className="sr-only">
+                    Nama API Key
+                  </label>
+                  <input
+                    id="api-key-name-input"
+                    type="text"
+                    maxLength={60}
+                    value={keyName}
+                    onChange={(e) => setKeyName(e.target.value)}
+                    placeholder="Misal: Claude Desktop, Cursor, ChatGPT"
+                    className="flex-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs text-[#0F172A] focus:bg-[#FFFFFF] focus:border-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/20"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!keyName.trim() || creating}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1E40AF] disabled:opacity-50"
+                  >
+                    {creating ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
+                    <span>Buat Key</span>
+                  </button>
+                </form>
+
+                {newSecret && (
+                  <div className="rounded-lg border border-[#15803D]/30 bg-[#DCFCE7] p-3 space-y-1.5">
+                    <div className="font-semibold text-[#15803D]">
+                      API Key berhasil dibuat — simpan sekarang (hanya tampil satu kali):
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <code className="flex-1 break-all rounded bg-[#FFFFFF] border border-[#15803D]/30 px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#0F172A]">
+                        {newSecret}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy('new-secret', newSecret)}
+                        aria-label="Salin API Key baru"
+                        className="inline-flex items-center gap-1 rounded-md bg-[#15803D] px-2.5 py-1.5 text-[11px] font-medium text-white hover:opacity-90 shrink-0"
+                      >
+                        {copiedId === 'new-secret' ? (
+                          <>
+                            <Check className="h-3.5 w-3.5" />
+                            <span>Disalin</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5" />
+                            <span>Salin</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {loadingKeys ? (
+                  <div className="flex items-center gap-2 text-[#475569] py-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Memuat daftar API Key...</span>
+                  </div>
+                ) : keys.length === 0 ? (
+                  <p className="text-[11px] text-[#475569] py-1">
+                    Belum ada API Key aktif. Buat satu di atas untuk menghubungkan AI Agent ke akun Anda.
                   </p>
                 ) : (
-                  <>
-                    <form onSubmit={handleCreateKey} className="flex items-center gap-2">
-                      <label htmlFor="api-key-name-input" className="sr-only">
-                        Nama API Key
-                      </label>
-                      <input
-                        id="api-key-name-input"
-                        type="text"
-                        maxLength={60}
-                        value={keyName}
-                        onChange={(e) => setKeyName(e.target.value)}
-                        placeholder="Misal: Claude Desktop, Cursor, ChatGPT"
-                        className="flex-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs text-[#0F172A] focus:bg-[#FFFFFF] focus:border-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/20"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!keyName.trim() || creating}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1E40AF] disabled:opacity-50"
+                  <ul className="divide-y divide-[#E2E8F0] rounded-lg border border-[#E2E8F0] overflow-hidden">
+                    {keys.map((k) => (
+                      <li
+                        key={k.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2 bg-[#FFFFFF]"
                       >
-                        {creating ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Plus className="h-3.5 w-3.5" />
-                        )}
-                        <span>Buat Key</span>
-                      </button>
-                    </form>
-
-                    {newSecret && (
-                      <div className="rounded-lg border border-[#15803D]/30 bg-[#DCFCE7] p-3 space-y-1.5">
-                        <div className="font-semibold text-[#15803D]">
-                          API Key berhasil dibuat — simpan sekarang (hanya tampil satu kali):
+                        <div className="min-w-0">
+                          <div className="font-medium text-[#0F172A] truncate">{k.name}</div>
+                          <div className="text-[11px] text-[#475569] font-mono-tabular">
+                            {k.keyPrefix}•••••••• • Dipakai: {formatDate(k.lastUsedAt)}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <code className="flex-1 break-all rounded bg-[#FFFFFF] border border-[#15803D]/30 px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#0F172A]">
-                            {newSecret}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => handleCopy('new-secret', newSecret)}
-                            aria-label="Salin API Key baru"
-                            className="inline-flex items-center gap-1 rounded-md bg-[#15803D] px-2.5 py-1.5 text-[11px] font-medium text-white hover:opacity-90 shrink-0"
-                          >
-                            {copiedId === 'new-secret' ? (
-                              <>
-                                <Check className="h-3.5 w-3.5" />
-                                <span>Disalin</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3.5 w-3.5" />
-                                <span>Salin</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {loadingKeys ? (
-                      <div className="flex items-center gap-2 text-[#475569] py-2">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Memuat daftar API Key...</span>
-                      </div>
-                    ) : keys.length === 0 ? (
-                      <p className="text-[11px] text-[#475569] py-1">
-                        Belum ada API Key aktif. Buat satu di atas untuk menghubungkan AI Agent ke akun Anda.
-                      </p>
-                    ) : (
-                      <ul className="divide-y divide-[#E2E8F0] rounded-lg border border-[#E2E8F0] overflow-hidden">
-                        {keys.map((k) => (
-                          <li
-                            key={k.id}
-                            className="flex items-center justify-between gap-2 px-3 py-2 bg-[#FFFFFF]"
-                          >
-                            <div className="min-w-0">
-                              <div className="font-medium text-[#0F172A] truncate">{k.name}</div>
-                              <div className="text-[11px] text-[#475569] font-mono-tabular">
-                                {k.keyPrefix}•••••••• • Dipakai: {formatDate(k.lastUsedAt)}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={revokingId === k.id}
-                              onClick={() => handleDeleteKey(k.id)}
-                              aria-label={`Cabut API Key ${k.name}`}
-                              className="p-1.5 rounded-md text-[#475569] hover:bg-[#FEE2E2] hover:text-[#B91C1C] disabled:opacity-40 shrink-0"
-                            >
-                              {revokingId === k.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </>
+                        <button
+                          type="button"
+                          disabled={revokingId === k.id}
+                          onClick={() => handleDeleteKey(k.id)}
+                          aria-label={`Cabut API Key ${k.name}`}
+                          className="p-1.5 rounded-md text-[#475569] hover:bg-[#FEE2E2] hover:text-[#B91C1C] disabled:opacity-40 shrink-0"
+                        >
+                          {revokingId === k.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
 
@@ -433,10 +712,10 @@ export function AiIntegrationModal({ open, onClose }) {
             <>
               <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3.5 space-y-2">
                 <div className="font-semibold text-[#0F172A]">
-                  Panduan AI Publik (<code className="font-mono-tabular">/llms.txt</code>)
+                  Panduan AI (<code className="font-mono-tabular">/llms.txt</code>)
                 </div>
                 <p className="text-[11px] text-[#475569] leading-relaxed">
-                  AI seperti ChatGPT, Gemini, Claude, atau Perplexity bisa membaca halaman panduan ini untuk mengetahui format tautan langsung FlowBoard — tanpa API key atau instalasi plugin.
+                  AI seperti ChatGPT, Gemini, Claude, atau Perplexity bisa membaca halaman panduan ini untuk menghasilkan tautan langsung yang terbuka otomatis di akun FlowBoard Pro Anda.
                 </p>
                 <div className="flex items-center gap-1.5">
                   <code className="flex-1 truncate rounded bg-[#FFFFFF] border border-[#E2E8F0] px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#0F172A]">

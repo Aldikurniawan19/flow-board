@@ -8,6 +8,8 @@ const SCHEMA_STATEMENTS = [
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    plan TEXT NOT NULL DEFAULT 'free',
+    plan_expires_at TEXT,
     created_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS sessions (
@@ -108,6 +110,10 @@ export function createPostgresDatabase(connectionString) {
         for (const stmt of SCHEMA_STATEMENTS) {
           await pool.query(stmt);
         }
+        await pool.query(
+          `ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'`,
+        );
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TEXT`);
       })().catch((err) => {
         initPromise = null;
         throw err;
@@ -159,6 +165,14 @@ export async function createSqliteDatabase(dbPath = './data/flowboard.sqlite') {
   }
   for (const stmt of SCHEMA_STATEMENTS) {
     raw.exec(`${stmt};`);
+  }
+  const userCols = /** @type {Array<{ name: string }>} */ (raw.prepare('PRAGMA table_info(users)').all());
+  const colNames = new Set(userCols.map((c) => c.name));
+  if (!colNames.has('plan')) {
+    raw.exec(`ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free';`);
+  }
+  if (!colNames.has('plan_expires_at')) {
+    raw.exec(`ALTER TABLE users ADD COLUMN plan_expires_at TEXT;`);
   }
 
   return {

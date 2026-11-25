@@ -17,9 +17,10 @@ FlowBoard is an interactive Excalidraw + Draw.io hybrid web application that tur
 
 ---
 
-## Method 1 (Works in ANY AI — Zero Setup): Instant Deep-Link URL
+## Method 1 (For FlowBoard Pro Accounts): Instant Deep-Link URL
+Note: Opening AI deep-links and draft URLs requires a signed-in FlowBoard Pro account.
 When a user asks you to create a diagram using FlowBoard:
-1. If you have HTTP/tool access, prefer calling `POST https://flow-board-dun.vercel.app/api/public/drafts` with JSON `{ "title": "...", "kind": "dfd", "code": "@startuml\n...\n@enduml" }` to get a **short** link `https://flow-board-dun.vercel.app/?draft=<id>` (valid 30 days, no API key required).
+1. If you have a FlowBoard Pro Bearer API Key (`Authorization: Bearer fbk_...`), call `POST https://flow-board-dun.vercel.app/api/v1/diagrams` or `POST https://flow-board-dun.vercel.app/api/mcp` (`generate_diagram`) to save directly into their workspace.
 2. Otherwise, construct a **clickable Markdown link** (NEVER output a raw bare 1000+ char URL as plain text, because browsers may treat copy-pasted long URLs as a Google search):
 
 ```markdown
@@ -40,17 +41,15 @@ When the user clicks the link, FlowBoard opens immediately with the fully render
 
 ---
 
-## Method 2 (For AI Agents, Claude, Cursor, Antigravity, Custom GPT): Remote MCP & REST API
+## Method 2 (For AI Agents, Claude, Cursor, Antigravity, Custom GPT — FlowBoard Pro): Remote MCP & REST API
 - **MCP Endpoint:** `POST https://flow-board-dun.vercel.app/api/mcp`
-- **Authentication:** Optional `Authorization: Bearer fbk_...` header (user creates a personal API key inside FlowBoard via `Menu -> Integrasi AI & MCP`).
-  - With API Key: `generate_diagram` saves directly into the user's FlowBoard workspace and returns `boardUrl` (`https://flow-board-dun.vercel.app/?board=<id>`). Also unlocks `list_boards`, `get_board`, and `delete_board`.
-  - Without API Key: `generate_diagram` creates a shareable public draft URL (`https://flow-board-dun.vercel.app/?draft=<id>`).
+- **Authentication:** Required `Authorization: Bearer fbk_...` header from a FlowBoard Pro / Owner account (created via `Menu -> Integrasi AI & MCP`).
 - **MCP Tools:** `generate_diagram`, `list_boards`, `get_board`, `delete_board`, `get_diagram_syntax_guide`
 - **REST Endpoints (OpenAPI):**
-  - `POST /api/v1/diagrams` (Bearer API key required)
-  - `GET /api/v1/boards` (Bearer API key required)
-  - `POST /api/public/drafts` (no auth required)
-  - `GET /api/v1/syntax-guide` (no auth required)
+  - `POST /api/v1/diagrams` (Pro Bearer API key required)
+  - `GET /api/v1/boards` (Pro Bearer API key required)
+  - `POST /api/public/drafts` (Pro auth required)
+  - `GET /api/v1/syntax-guide` (public)
 
 ---
 

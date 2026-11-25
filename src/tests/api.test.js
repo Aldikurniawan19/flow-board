@@ -154,68 +154,122 @@ describe('Auth & Boards API (Happy path, validation, & anti-IDOR security)', () 
     expect(verifyA.body.board.title).toBe('Rahasia User A');
   });
 
-  it('supports personal API keys, Remote MCP Server (/api/mcp), REST v1, OpenAPI, and anti-IDOR isolation', async () => {
-    const agentA = request.agent(app);
-    await agentA.post('/api/auth/register').set(CSRF).send({
-      name: 'User MCP A',
-      email: 'mcpa@example.com',
-      password: 'PasswordA123',
-    });
+  it('enforces Pro/Owner access control on API keys, MCP, REST v1, and drafts with anti-IDOR isolation', async () => {
+    const prevOwnerEmails = process.env.OWNER_EMAILS;
+    process.env.OWNER_EMAILS = 'mcpa@example.com';
 
-    const agentB = request.agent(app);
-    await agentB.post('/api/auth/register').set(CSRF).send({
-      name: 'User MCP B',
-      email: 'mcpb@example.com',
-      password: 'PasswordB123',
-    });
+    try {
+      // 1. Free user is strictly blocked (403) from creating API keys, drafts, or calling MCP tools
+      const agentFree = request.agent(app);
+      const freeReg = await agentFree.post('/api/auth/register').set(CSRF).send({
+        name: 'User Free',
+        email: 'free@example.com',
+        password: 'PasswordF123',
+      });
+      expect(freeReg.status).toBe(201);
+      expect(freeReg.body.user.plan).toBe('free');
+      expect(freeReg.body.user.hasAiAccess).toBe(false);
 
-    // Create personal API keys for User A and User B
-    const keyResA = await agentA.post('/api/keys').set(CSRF).send({ name: 'Claude Desktop' });
-    expect(keyResA.status).toBe(201);
-    expect(keyResA.body.secret).toMatch(/^fbk_[a-f0-9]{48}$/);
-    const secretA = keyResA.body.secret;
-    const keyIdA = keyResA.body.apiKey.id;
+      const freeKeyAttempt = await agentFree.post('/api/keys').set(CSRF).send({ name: 'Blocked Key' });
+      expect(freeKeyAttempt.status).toBe(403);
+      expect(freeKeyAttempt.body.code).toBe('PRO_REQUIRED');
 
-    const keyResB = await agentB.post('/api/keys').set(CSRF).send({ name: 'Cursor B' });
-    expect(keyResB.status).toBe(201);
-    const secretB = keyResB.body.secret;
+      const freeDraftAttempt = await agentFree.post('/api/public/drafts').send({
+        title: 'Blocked Draft',
+        code: '@startuml\nentity A {\n* id <<PK>>\n}\n@enduml',
+      });
+      expect(freeDraftAttempt.status).toBe(403);
 
-    // Listing keys returns safe prefix only (never raw secret or hash)
-    const listKeysA = await agentA.get('/api/keys');
-    expect(listKeysA.status).toBe(200);
-    expect(listKeysA.body.keys).toHaveLength(1);
-    expect(listKeysA.body.keys[0].keyPrefix).toBe(secretA.slice(0, 12));
-    expect(listKeysA.body.keys[0].secret).toBeUndefined();
+      const unauthDraftAttempt = await request(app).post('/api/public/drafts').send({
+        title: 'Unauth Draft',
+        code: '@startuml\nentity A {\n* id <<PK>>\n}\n@enduml',
+      });
+      expect(unauthDraftAttempt.status).toBe(401);
 
-    // User B cannot revoke User A's API key (anti-IDOR)
-    const idorRevoke = await agentB.delete(`/api/keys/${keyIdA}`).set(CSRF);
-    expect(idorRevoke.status).toBe(403);
+      // Unauthenticated MCP generate_diagram is blocked (PRO_REQUIRED)
+      const unauthMcpGen = await request(app)
+        .post('/api/mcp')
+        .send({
+          jsonrpc: '2.0',
+          id: 99,
+          method: 'tools/call',
+          params: {
+            name: 'generate_diagram',
+            arguments: { title: 'Blocked Guest', code: '@startuml\nentity A\n@enduml' },
+          },
+        });
+      expect(unauthMcpGen.status).toBe(200);
+      expect(unauthMcpGen.body.result.isError).toBe(true);
+      expect(unauthMcpGen.body.result.structuredContent.code).toBe('PRO_REQUIRED');
 
-    // OpenAPI 3.1.0 spec is publicly accessible
-    const openApiRes = await request(app).get('/api/openapi.json');
-    expect(openApiRes.status).toBe(200);
-    expect(openApiRes.body.openapi).toBe('3.1.0');
-    expect(openApiRes.body.paths['/api/v1/diagrams']).toBeDefined();
+      // 2. Owner account (via server-side OWNER_EMAILS) automatically has full AI/MCP access
+      const agentA = request.agent(app);
+      const regA = await agentA.post('/api/auth/register').set(CSRF).send({
+        name: 'Owner MCP A',
+        email: 'mcpa@example.com',
+        password: 'PasswordA123',
+      });
+      expect(regA.status).toBe(201);
+      expect(regA.body.user.isOwner).toBe(true);
+      expect(regA.body.user.hasAiAccess).toBe(true);
 
-    // MCP initialize & tools/list
-    const initRes = await request(app)
-      .post('/api/mcp')
-      .set('Authorization', `Bearer ${secretA}`)
-      .send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } });
-    expect(initRes.status).toBe(200);
-    expect(initRes.body.result.serverInfo.name).toBe('flowboard-mcp');
+      // 3. Separate Pro user B (upgraded in DB) also gets access, with strict anti-IDOR isolation
+      const agentB = request.agent(app);
+      const regB = await agentB.post('/api/auth/register').set(CSRF).send({
+        name: 'Pro User B',
+        email: 'mcpb@example.com',
+        password: 'PasswordB123',
+      });
+      expect(regB.body.user.hasAiAccess).toBe(false);
+      await db.run('UPDATE users SET plan = ? WHERE email = ?', ['pro', 'mcpb@example.com']);
 
-    const toolsRes = await request(app)
-      .post('/api/mcp')
-      .send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    expect(toolsRes.status).toBe(200);
-    const toolNames = toolsRes.body.result.tools.map((/** @type {any} */ t) => t.name);
-    expect(toolNames).toContain('generate_diagram');
-    expect(toolNames).toContain('list_boards');
-    expect(toolNames).toContain('get_diagram_syntax_guide');
+      // Create personal API keys for Owner A and Pro User B
+      const keyResA = await agentA.post('/api/keys').set(CSRF).send({ name: 'Claude Desktop' });
+      expect(keyResA.status).toBe(201);
+      expect(keyResA.body.secret).toMatch(/^fbk_[a-f0-9]{48}$/);
+      const secretA = keyResA.body.secret;
+      const keyIdA = keyResA.body.apiKey.id;
 
-    // MCP authenticated generate_diagram saves directly into User A's account
-    const dfdCode = `@startuml
+      const keyResB = await agentB.post('/api/keys').set(CSRF).send({ name: 'Cursor B' });
+      expect(keyResB.status).toBe(201);
+      const secretB = keyResB.body.secret;
+
+      // Listing keys returns safe prefix only (never raw secret or hash)
+      const listKeysA = await agentA.get('/api/keys');
+      expect(listKeysA.status).toBe(200);
+      expect(listKeysA.body.keys).toHaveLength(1);
+      expect(listKeysA.body.keys[0].keyPrefix).toBe(secretA.slice(0, 12));
+      expect(listKeysA.body.keys[0].secret).toBeUndefined();
+
+      // User B cannot revoke User A's API key (anti-IDOR)
+      const idorRevoke = await agentB.delete(`/api/keys/${keyIdA}`).set(CSRF);
+      expect(idorRevoke.status).toBe(403);
+
+      // OpenAPI 3.1.0 spec is publicly accessible
+      const openApiRes = await request(app).get('/api/openapi.json');
+      expect(openApiRes.status).toBe(200);
+      expect(openApiRes.body.openapi).toBe('3.1.0');
+      expect(openApiRes.body.paths['/api/v1/diagrams']).toBeDefined();
+
+      // MCP initialize & tools/list
+      const initRes = await request(app)
+        .post('/api/mcp')
+        .set('Authorization', `Bearer ${secretA}`)
+        .send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } });
+      expect(initRes.status).toBe(200);
+      expect(initRes.body.result.serverInfo.name).toBe('flowboard-mcp');
+
+      const toolsRes = await request(app)
+        .post('/api/mcp')
+        .send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+      expect(toolsRes.status).toBe(200);
+      const toolNames = toolsRes.body.result.tools.map((/** @type {any} */ t) => t.name);
+      expect(toolNames).toContain('generate_diagram');
+      expect(toolNames).toContain('list_boards');
+      expect(toolNames).toContain('get_diagram_syntax_guide');
+
+      // MCP authenticated generate_diagram saves directly into Owner A's account
+      const dfdCode = `@startuml
 title DFD Level 1 - Pengiriman Barang
 rectangle "Pengirim" as E1 <<External>>
 usecase "1.0\\nOrder" as P1 <<Process>>
@@ -224,89 +278,100 @@ E1 --> P1 : Data Paket
 P1 --> D1 : Simpan Resi
 @enduml`;
 
-    const genRes = await request(app)
-      .post('/api/mcp')
-      .set('Authorization', `Bearer ${secretA}`)
-      .send({
-        jsonrpc: '2.0',
-        id: 3,
-        method: 'tools/call',
-        params: {
-          name: 'generate_diagram',
-          arguments: { title: 'DFD Pengiriman AI', code: dfdCode, kind: 'dfd' },
-        },
-      });
-    expect(genRes.status).toBe(200);
-    const genPayload = genRes.body.result.structuredContent;
-    expect(genPayload.storage).toBe('user_workspace');
-    expect(genPayload.boardId).toBeTruthy();
-    expect(genPayload.boardUrl).toContain(`/?board=${genPayload.boardId}`);
-    expect(genPayload.summary.nodes).toBe(3);
+      const genRes = await request(app)
+        .post('/api/mcp')
+        .set('Authorization', `Bearer ${secretA}`)
+        .send({
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'tools/call',
+          params: {
+            name: 'generate_diagram',
+            arguments: { title: 'DFD Pengiriman AI', code: dfdCode, kind: 'dfd' },
+          },
+        });
+      expect(genRes.status).toBe(200);
+      const genPayload = genRes.body.result.structuredContent;
+      expect(genPayload.storage).toBe('user_workspace');
+      expect(genPayload.boardId).toBeTruthy();
+      expect(genPayload.boardUrl).toContain(`/?board=${genPayload.boardId}`);
+      expect(genPayload.summary.nodes).toBe(3);
 
-    // User A sees the MCP-created board in their workspace
-    const boardCheckA = await agentA.get(`/api/boards/${genPayload.boardId}`);
-    expect(boardCheckA.status).toBe(200);
-    expect(boardCheckA.body.board.title).toBe('DFD Pengiriman AI');
-    expect(boardCheckA.body.board.elements.length).toBeGreaterThanOrEqual(5);
+      // Owner A sees the MCP-created board in their workspace
+      const boardCheckA = await agentA.get(`/api/boards/${genPayload.boardId}`);
+      expect(boardCheckA.status).toBe(200);
+      expect(boardCheckA.body.board.title).toBe('DFD Pengiriman AI');
+      expect(boardCheckA.body.board.elements.length).toBeGreaterThanOrEqual(5);
 
-    // User B's API key CANNOT read or delete User A's board via MCP (anti-IDOR)
-    const idorMcpGet = await request(app)
-      .post('/api/mcp')
-      .set('Authorization', `Bearer ${secretB}`)
-      .send({
-        jsonrpc: '2.0',
-        id: 4,
-        method: 'tools/call',
-        params: { name: 'get_board', arguments: { boardId: genPayload.boardId } },
-      });
-    expect(idorMcpGet.status).toBe(200);
-    expect(idorMcpGet.body.result.isError).toBe(true);
+      // Pro User B's API key CANNOT read or delete Owner A's board via MCP (anti-IDOR)
+      const idorMcpGet = await request(app)
+        .post('/api/mcp')
+        .set('Authorization', `Bearer ${secretB}`)
+        .send({
+          jsonrpc: '2.0',
+          id: 4,
+          method: 'tools/call',
+          params: { name: 'get_board', arguments: { boardId: genPayload.boardId } },
+        });
+      expect(idorMcpGet.status).toBe(200);
+      expect(idorMcpGet.body.result.isError).toBe(true);
 
-    // Unauthenticated MCP generate_diagram creates a public draft URL instead
-    const guestGen = await request(app)
-      .post('/api/mcp')
-      .send({
-        jsonrpc: '2.0',
-        id: 5,
-        method: 'tools/call',
-        params: {
-          name: 'generate_diagram',
-          arguments: { title: 'Draft Publik AI', code: dfdCode, kind: 'dfd' },
-        },
-      });
-    expect(guestGen.status).toBe(200);
-    const guestPayload = guestGen.body.result.structuredContent;
-    expect(guestPayload.storage).toBe('public_draft');
-    expect(guestPayload.draftId).toBeTruthy();
-    expect(guestPayload.url).toContain(`/?draft=${guestPayload.draftId}`);
+      // Authenticated Owner A can create & fetch drafts via Bearer API key
+      const draftCreate = await request(app)
+        .post('/api/public/drafts')
+        .set('Authorization', `Bearer ${secretA}`)
+        .send({ title: 'Draft Owner AI', code: dfdCode, kind: 'dfd' });
+      expect(draftCreate.status).toBe(201);
+      const draftRes = await request(app)
+        .get(`/api/public/drafts/${draftCreate.body.draftId}`)
+        .set('Authorization', `Bearer ${secretA}`);
+      expect(draftRes.status).toBe(200);
+      expect(draftRes.body.draft.title).toBe('Draft Owner AI');
 
-    // Fetch public draft via REST endpoint
-    const draftRes = await request(app).get(`/api/public/drafts/${guestPayload.draftId}`);
-    expect(draftRes.status).toBe(200);
-    expect(draftRes.body.draft.title).toBe('Draft Publik AI');
-    expect(draftRes.body.draft.elements.length).toBeGreaterThanOrEqual(5);
+      // REST v1 endpoint works with Owner Bearer key and rejects invalid key
+      const v1Create = await request(app)
+        .post('/api/v1/diagrams')
+        .set('Authorization', `Bearer ${secretA}`)
+        .send({
+          title: 'ERD Chen via REST',
+          code: 'entity A {\n * id <<PK>>\n}\nentity B {\n * id <<PK>>\n}\nA "1" -- "N" B : "HAS"',
+          kind: 'erd_chen',
+        });
+      expect(v1Create.status).toBe(201);
+      expect(v1Create.body.kind).toBe('erd_chen');
 
-    // REST v1 endpoint works with Bearer key and rejects invalid key
-    const v1Create = await request(app)
-      .post('/api/v1/diagrams')
-      .set('Authorization', `Bearer ${secretA}`)
-      .send({ title: 'ERD Chen via REST', code: 'entity A {\n * id <<PK>>\n}\nentity B {\n * id <<PK>>\n}\nA "1" -- "N" B : "HAS"', kind: 'erd_chen' });
-    expect(v1Create.status).toBe(201);
-    expect(v1Create.body.kind).toBe('erd_chen');
+      const badBearer = await request(app)
+        .post('/api/mcp')
+        .set('Authorization', 'Bearer fbk_invalid_token_1234567890')
+        .send({ jsonrpc: '2.0', id: 6, method: 'ping' });
+      expect(badBearer.status).toBe(401);
 
-    const badBearer = await request(app)
-      .post('/api/mcp')
-      .set('Authorization', 'Bearer fbk_invalid_token_1234567890')
-      .send({ jsonrpc: '2.0', id: 6, method: 'ping' });
-    expect(badBearer.status).toBe(401);
+      // Downgrading Pro User B back to Free immediately revokes API access (403)
+      await db.run('UPDATE users SET plan = ? WHERE email = ?', ['free', 'mcpb@example.com']);
+      const downgradedRest = await request(app)
+        .get('/api/v1/boards')
+        .set('Authorization', `Bearer ${secretB}`);
+      expect(downgradedRest.status).toBe(403);
+      const downgradedMcp = await request(app)
+        .post('/api/mcp')
+        .set('Authorization', `Bearer ${secretB}`)
+        .send({ jsonrpc: '2.0', id: 7, method: 'ping' });
+      expect(downgradedMcp.status).toBe(403);
 
-    // Revoking User A's key immediately blocks subsequent Bearer requests
-    const revokeRes = await agentA.delete(`/api/keys/${keyIdA}`).set(CSRF);
-    expect(revokeRes.status).toBe(200);
+      // Revoking Owner A's key immediately blocks subsequent Bearer requests
+      const revokeRes = await agentA.delete(`/api/keys/${keyIdA}`).set(CSRF);
+      expect(revokeRes.status).toBe(200);
 
-    const afterRevoke = await request(app)
-      .get('/api/v1/boards')
-      .set('Authorization', `Bearer ${secretA}`);
-    expect(afterRevoke.status).toBe(401);
+      const afterRevoke = await request(app)
+        .get('/api/v1/boards')
+        .set('Authorization', `Bearer ${secretA}`);
+      expect(afterRevoke.status).toBe(401);
+    } finally {
+      if (prevOwnerEmails === undefined) {
+        delete process.env.OWNER_EMAILS;
+      } else {
+        process.env.OWNER_EMAILS = prevOwnerEmails;
+      }
+    }
   });
 });

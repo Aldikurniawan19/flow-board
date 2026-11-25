@@ -28,7 +28,9 @@ describe('FlowBoard UI integration', () => {
       copiedSize: null,
       theme: 'light',
       guestPreviewMode: false,
+      aiUpgradeRequested: false,
       pendingBoardId: null,
+      pendingDeepLink: null,
       pendingDiagram: null,
     });
     window.history.replaceState({}, '', '/');
@@ -606,7 +608,32 @@ describe('FlowBoard UI integration', () => {
     expect(syncedEls.find((e) => e.id === 'sync-p1')?.fillColor).toBe('#FEF3C7');
     expect(syncedEls.find((e) => e.id === 'sync-p2')?.fillColor).toBe('#DCFCE7');
 
-    // Open Integrasi AI & MCP modal, create and revoke an API key, and inspect Prompt tab
+    // Free user clicking Integrasi AI & MCP sees persuasive Pro pitch -> pricing -> WhatsApp Admin CTA
+    await user.click(screen.getByRole('button', { name: /Menu PlantText dan Ekspor Impor/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Integrasi AI & MCP/i }));
+    expect(screen.getByRole('heading', { name: /Integrasi AI & MCP — FlowBoard Pro/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Berlangganan Pro' }));
+    expect(screen.getByRole('heading', { name: 'Pilih Paket FlowBoard Pro' })).toBeInTheDocument();
+    expect(screen.getByText('Rp 29.000')).toBeInTheDocument();
+    expect(screen.getByText('Rp 249.000')).toBeInTheDocument();
+    const waLink = screen.getByRole('link', { name: 'Hubungi Admin via WhatsApp' });
+    expect(waLink.getAttribute('href')).toContain('https://wa.me/');
+    expect(waLink.getAttribute('href')).toContain(encodeURIComponent('rina@example.com'));
+    await user.click(screen.getByRole('button', { name: 'Tutup dialog integrasi AI' }));
+
+    // Owner / Pro user gets full MCP Server & API Key manager
+    act(() => {
+      useBoardStore.setState({
+        user: {
+          id: 'u1',
+          name: 'Rina',
+          email: 'rina@example.com',
+          plan: 'pro',
+          isOwner: true,
+          hasAiAccess: true,
+        },
+      });
+    });
     vi.spyOn(apiClient, 'listApiKeys').mockResolvedValue({ keys: [] });
     vi.spyOn(apiClient, 'createApiKey').mockResolvedValue({
       apiKey: {
@@ -637,9 +664,7 @@ describe('FlowBoard UI integration', () => {
     await user.click(screen.getByRole('button', { name: 'Tutup dialog integrasi AI' }));
   }, 25000);
 
-  it('opens an AI deep-link diagram directly in guest preview mode without login wall', async () => {
-    vi.spyOn(apiClient, 'getMe').mockRejectedValue(new Error('Unauthorized'));
-
+  it('locks AI deep-link URLs to Pro/Owner accounts while blocking guests and free users', async () => {
     const plantCode = `@startuml
 entity "PELANGGAN" as p {
   * id_pelanggan <<PK>>
@@ -654,20 +679,56 @@ entity "TRANSAKSI" as t {
 p "1" -- "N" t : "MELAKUKAN"
 @enduml`;
 
-    const qs = new URLSearchParams({
-      kind: 'erd_chen',
-      title: 'ERD Rental AI',
-      code: plantCode,
+    // 1. Unauthenticated visitor sees Auth screen (deep-link does NOT bypass login)
+    vi.spyOn(apiClient, 'getMe').mockRejectedValueOnce(new Error('Unauthorized'));
+    const qs1 = new URLSearchParams({ kind: 'erd_chen', title: 'ERD Rental AI', code: plantCode });
+    window.history.replaceState({}, '', `/?${qs1.toString()}`);
+
+    const firstRender = render(<App />);
+    expect(await screen.findByRole('heading', { name: 'FlowBoard' })).toBeInTheDocument();
+    expect(useBoardStore.getState().guestPreviewMode).toBe(false);
+    expect(useBoardStore.getState().elements).toHaveLength(0);
+    firstRender.unmount();
+
+    // 2. Authenticated Free user does NOT import diagram and gets Pro upgrade modal instead
+    vi.spyOn(apiClient, 'getMe').mockResolvedValueOnce({
+      user: { id: 'u-free', name: 'Free', email: 'free@example.com', plan: 'free', isOwner: false, hasAiAccess: false },
     });
-    window.history.replaceState({}, '', `/?${qs.toString()}`);
+    vi.spyOn(apiClient, 'listBoards').mockResolvedValue({
+      boards: [{ id: 'bf1', title: 'Papan Gratis', createdAt: '', updatedAt: '' }],
+    });
+    vi.spyOn(apiClient, 'getBoard').mockResolvedValue({
+      board: { id: 'bf1', title: 'Papan Gratis', settings: { renderMode: 'clean', gridMode: 'dots', snapToGrid: true }, elements: [] },
+    });
+    window.history.replaceState({}, '', `/?${qs1.toString()}`);
+
+    const freeRender = render(<App />);
+    expect(
+      await screen.findByRole('heading', { name: /Integrasi AI & MCP — FlowBoard Pro/i }),
+    ).toBeInTheDocument();
+    expect(useBoardStore.getState().elements).toHaveLength(0);
+    freeRender.unmount();
+
+    // 3. Authenticated Owner/Pro user automatically imports the AI deep-link into a new board
+    vi.spyOn(apiClient, 'getMe').mockResolvedValueOnce({
+      user: { id: 'u-own', name: 'Owner', email: 'owner@example.com', plan: 'pro', isOwner: true, hasAiAccess: true },
+    });
+    vi.spyOn(apiClient, 'createBoard').mockResolvedValueOnce({
+      board: {
+        id: 'b-ai',
+        title: 'ERD Rental AI',
+        settings: { renderMode: 'clean', gridMode: 'dots', snapToGrid: true, autoCorrectShapes: true, syncSameType: true },
+        elements: [],
+        createdAt: '',
+        updatedAt: '',
+      },
+    });
+    window.history.replaceState({}, '', `/?${qs1.toString()}`);
 
     render(<App />);
-
-    expect(await screen.findByRole('button', { name: 'Masuk & Simpan' })).toBeInTheDocument();
-    expect(useBoardStore.getState().guestPreviewMode).toBe(true);
-    expect(useBoardStore.getState().boardTitle).toBe('ERD Rental AI');
-    expect(useBoardStore.getState().elements.some((e) => e.type === 'erd_chen_entity')).toBe(true);
-    expect(useBoardStore.getState().elements.some((e) => e.type === 'erd_chen_relation')).toBe(true);
-    expect(useBoardStore.getState().elements.some((e) => e.type === 'erd_chen_key_attr')).toBe(true);
+    await waitFor(() => {
+      expect(useBoardStore.getState().boardTitle).toBe('ERD Rental AI');
+      expect(apiClient.createBoard).toHaveBeenCalled();
+    });
   });
 });

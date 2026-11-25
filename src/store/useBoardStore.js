@@ -109,14 +109,17 @@ function appendHistory(past, current) {
 
 export const useBoardStore = create((set, get) => ({
   // Auth state
-  /** @type {{ id: string, name: string, email: string } | null} */
+  /** @type {{ id: string, name: string, email: string, plan?: 'free' | 'pro', isOwner?: boolean, hasAiAccess?: boolean } | null} */
   user: null,
   /** @type {'loading' | 'authenticated' | 'unauthenticated'} */
   authStatus: 'loading',
   authError: '',
   guestPreviewMode: false,
+  aiUpgradeRequested: false,
   /** @type {string | null} */
   pendingBoardId: null,
+  /** @type {ReturnType<typeof parseIncomingDiagramLink>} */
+  pendingDeepLink: null,
   /** @type {{ title: string, elements: import('../types/schema.js').BoardElement[], renderMode: 'clean' | 'sketch', kindLabel: string } | null} */
   pendingDiagram: null,
 
@@ -308,51 +311,91 @@ export const useBoardStore = create((set, get) => ({
     }
   },
 
+  clearAiUpgradeRequest: () => set({ aiUpgradeRequested: false }),
+
+  /**
+   * Process an incoming AI deep-link (`planttext` or `draft`) ONLY if the authenticated user
+   * has server-verified Pro / Owner access (`user.hasAiAccess`). Free accounts are redirected
+   * to the Pro upgrade modal instead of importing the diagram.
+   * @param {ReturnType<typeof parseIncomingDiagramLink>} link
+   */
+  handleAuthorizedDeepLink: async (link) => {
+    if (!link || (link.type !== 'planttext' && link.type !== 'draft')) return;
+    const { user } = get();
+    if (!user?.hasAiAccess) {
+      set({
+        pendingDeepLink: null,
+        aiUpgradeRequested: true,
+        feedback: {
+          type: 'info',
+          message: 'Tautan impor diagram AI khusus untuk akun FlowBoard Pro.',
+        },
+      });
+      return;
+    }
+
+    if (link.type === 'planttext') {
+      const parsed = parsePlantText(link.code, {
+        kind: link.kind,
+        renderMode: link.renderMode,
+      });
+      if (!parsed.ok) {
+        set({
+          pendingDeepLink: null,
+          feedback: { type: 'error', message: parsed.error },
+        });
+        return;
+      }
+      await get().importDiagramAsNewBoard({
+        title: link.title || parsed.kindLabel,
+        elements: parsed.elements,
+        renderMode: link.renderMode,
+        kindLabel: parsed.kindLabel,
+      });
+      set({ pendingDeepLink: null });
+      return;
+    }
+
+    if (link.type === 'draft') {
+      try {
+        const { draft } = await apiClient.getPublicDraft(link.draftId);
+        await get().importDiagramAsNewBoard({
+          title: draft.title || 'Draf Diagram AI',
+          elements: Array.isArray(draft.elements) ? draft.elements : [],
+          renderMode: 'clean',
+          kindLabel: draft.kind || 'Diagram',
+        });
+        set({ pendingDeepLink: null });
+      } catch (err) {
+        set({
+          pendingDeepLink: null,
+          feedback: {
+            type: 'error',
+            message:
+              /** @type {Error} */ (err)?.message ||
+              'Draf diagram tidak ditemukan atau memerlukan akun FlowBoard Pro.',
+          },
+        });
+      }
+    }
+  },
+
   bootstrapAuth: async () => {
     set({ authStatus: 'loading', authError: '' });
 
-    /** @type {{ title: string, elements: import('../types/schema.js').BoardElement[], renderMode: 'clean' | 'sketch', kindLabel: string } | null} */
-    let incomingDiagram = null;
+    /** @type {ReturnType<typeof parseIncomingDiagramLink>} */
+    let incomingLink = null;
     /** @type {string | null} */
     let incomingBoardId = null;
-    let incomingError = '';
 
     if (typeof window !== 'undefined') {
       const link = parseIncomingDiagramLink(window.location.search, window.location.hash);
       if (link) {
         if (link.type === 'board') {
           incomingBoardId = link.boardId;
-        } else if (link.type === 'planttext') {
-          const parsed = parsePlantText(link.code, {
-            kind: link.kind,
-            renderMode: link.renderMode,
-          });
-          if (parsed.ok) {
-            incomingDiagram = {
-              title: link.title || parsed.kindLabel,
-              elements: parsed.elements,
-              renderMode: link.renderMode,
-              kindLabel: parsed.kindLabel,
-            };
-          } else {
-            incomingError = parsed.error;
-          }
-        } else if (link.type === 'draft') {
-          try {
-            const { draft } = await apiClient.getPublicDraft(link.draftId);
-            incomingDiagram = {
-              title: draft.title || 'Draf Diagram AI',
-              elements: Array.isArray(draft.elements) ? draft.elements : [],
-              renderMode: 'clean',
-              kindLabel: draft.kind || 'Diagram',
-            };
-          } catch (err) {
-            incomingError =
-              /** @type {Error} */ (err)?.message ||
-              'Draf diagram dari tautan tidak ditemukan atau sudah kedaluwarsa.';
-          }
+        } else {
+          incomingLink = link;
         }
-
         try {
           window.history.replaceState({}, '', window.location.pathname || '/');
         } catch {
@@ -365,64 +408,50 @@ export const useBoardStore = create((set, get) => ({
       const { user } = await apiClient.getMe();
       set({ user, authStatus: 'authenticated', guestPreviewMode: false });
       await get().loadBoards(incomingBoardId || undefined);
-      if (incomingDiagram) {
-        await get().importDiagramAsNewBoard(incomingDiagram);
-      } else if (incomingError) {
-        set({ feedback: { type: 'error', message: incomingError } });
+      if (incomingLink) {
+        await get().handleAuthorizedDeepLink(incomingLink);
       }
     } catch {
-      if (incomingDiagram) {
-        set({
-          user: null,
-          authStatus: 'unauthenticated',
-          guestPreviewMode: true,
-          pendingDiagram: incomingDiagram,
-          pendingBoardId: null,
-          activeBoardId: null,
-          boardTitle: incomingDiagram.title,
-          elements: incomingDiagram.elements,
-          settings: { ...DEFAULT_SETTINGS, renderMode: incomingDiagram.renderMode },
-          camera: computeFitCamera(incomingDiagram.elements),
-          selectedIds: [],
-          past: [],
-          future: [],
-          feedback: {
-            type: 'info',
-            message: `Mode pratinjau: "${incomingDiagram.title}" siap diedit & diekspor. Masuk untuk menyimpannya ke akun Anda.`,
-          },
-        });
-      } else {
-        set({
-          user: null,
-          authStatus: 'unauthenticated',
-          guestPreviewMode: false,
-          pendingBoardId: incomingBoardId,
-          feedback: incomingError ? { type: 'error', message: incomingError } : null,
-        });
-      }
+      set({
+        user: null,
+        authStatus: 'unauthenticated',
+        guestPreviewMode: false,
+        pendingBoardId: incomingBoardId,
+        pendingDeepLink: incomingLink,
+        feedback: incomingLink
+          ? {
+              type: 'info',
+              message: 'Masuk dengan akun FlowBoard Pro untuk membuka tautan diagram AI.',
+            }
+          : null,
+      });
     }
   },
 
   login: async (email, password) => {
     set({ authError: '' });
-    const { pendingDiagram, pendingBoardId } = get();
+    const { pendingDiagram, pendingBoardId, pendingDeepLink } = get();
     const { user } = await apiClient.login({ email, password });
     set({ user, authStatus: 'authenticated', authError: '', guestPreviewMode: false });
     await get().loadBoards(pendingBoardId || undefined);
     set({ pendingBoardId: null });
-    if (pendingDiagram) {
+    if (pendingDeepLink) {
+      await get().handleAuthorizedDeepLink(pendingDeepLink);
+    } else if (pendingDiagram) {
       await get().importDiagramAsNewBoard(pendingDiagram);
     }
   },
 
   register: async (name, email, password) => {
     set({ authError: '' });
-    const { pendingDiagram, pendingBoardId } = get();
+    const { pendingDiagram, pendingBoardId, pendingDeepLink } = get();
     const { user } = await apiClient.register({ name, email, password });
     set({ user, authStatus: 'authenticated', authError: '', guestPreviewMode: false });
     await get().loadBoards(pendingBoardId || undefined);
     set({ pendingBoardId: null });
-    if (pendingDiagram) {
+    if (pendingDeepLink) {
+      await get().handleAuthorizedDeepLink(pendingDeepLink);
+    } else if (pendingDiagram) {
       await get().importDiagramAsNewBoard(pendingDiagram);
     }
   },

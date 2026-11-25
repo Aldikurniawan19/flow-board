@@ -1,5 +1,5 @@
 import express from 'express';
-import { createRequireApiKey } from '../middleware/auth.js';
+import { createRequireApiKey, requireAiAccess } from '../middleware/auth.js';
 import { applyExternalApiCors, createRateLimiter } from '../middleware/security.js';
 import {
   DIAGRAM_KINDS,
@@ -157,7 +157,7 @@ export function createExternalApiRouter(db, options = {}) {
     return res.status(200).json(getDiagramSyntaxGuide(resolveBaseUrl(req)));
   });
 
-  router.get('/boards', requireApiKey, async (req, res, next) => {
+  router.get('/boards', requireApiKey, requireAiAccess, async (req, res, next) => {
     try {
       const user = req.user;
       if (!user) return res.status(401).json({ error: 'API Key diperlukan.' });
@@ -188,7 +188,7 @@ export function createExternalApiRouter(db, options = {}) {
     }
   });
 
-  router.post('/diagrams', requireApiKey, async (req, res, next) => {
+  router.post('/diagrams', requireApiKey, requireAiAccess, async (req, res, next) => {
     try {
       const user = req.user;
       if (!user) return res.status(401).json({ error: 'API Key diperlukan.' });
