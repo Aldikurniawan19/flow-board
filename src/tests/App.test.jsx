@@ -608,10 +608,15 @@ describe('FlowBoard UI integration', () => {
     expect(syncedEls.find((e) => e.id === 'sync-p1')?.fillColor).toBe('#FEF3C7');
     expect(syncedEls.find((e) => e.id === 'sync-p2')?.fillColor).toBe('#DCFCE7');
 
-    // Free user clicking Integrasi AI & MCP sees persuasive Pro pitch -> pricing -> WhatsApp Admin CTA
+    // Free user clicking Integrasi AI & MCP sees interactive 2-scene motion demo + Pro pitch -> pricing -> WhatsApp Admin CTA
     await user.click(screen.getByRole('button', { name: /Menu PlantText dan Ekspor Impor/i }));
     await user.click(screen.getByRole('menuitem', { name: /Integrasi AI & MCP/i }));
     expect(screen.getByRole('heading', { name: /Integrasi AI & MCP — FlowBoard Pro/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1. Koneksi MCP' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '2. Tautan AI' }));
+    expect(screen.getByText(/Buka Diagram di FlowBoard/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Jeda animasi demo' }));
+    expect(screen.getByRole('button', { name: 'Putar animasi demo' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Berlangganan Pro' }));
     expect(screen.getByRole('heading', { name: 'Pilih Paket FlowBoard Pro' })).toBeInTheDocument();
     expect(screen.getByText('Rp 29.000')).toBeInTheDocument();

@@ -93,11 +93,210 @@ body,
   animation: hot-badge-blink 1.1s ease-in-out infinite;
 }
 
+/* FlowBoard Pro AI & MCP Interactive Motion Showcase */
+@keyframes fb-m-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fb-m-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.84) translateY(5px);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.03) translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes fb-m-beam {
+  0% {
+    opacity: 0;
+    stroke-dasharray: 28 100;
+    stroke-dashoffset: 32;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    stroke-dasharray: 28 100;
+    stroke-dashoffset: -102;
+  }
+}
+
+@keyframes fb-m-draw {
+  0% {
+    opacity: 0;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+  }
+  12% {
+    opacity: 1;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 90;
+  }
+  100% {
+    opacity: 1;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fb-m-ring {
+  0% {
+    opacity: 0.85;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.38);
+  }
+}
+
+@keyframes fb-m-cursor {
+  0% {
+    opacity: 0;
+    transform: translate(58px, 44px) scale(1);
+  }
+  18% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  84% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0.86);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+@keyframes fb-m-btn-click {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  45% {
+    transform: scale(0.95);
+    filter: brightness(1.22);
+  }
+}
+
+@keyframes fb-m-ripple {
+  0% {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  20% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.1);
+  }
+}
+
+@keyframes fb-m-progress {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.fb-m-fade {
+  opacity: 0;
+  animation: fb-m-fade 0.4s ease-out both;
+}
+
+.fb-m-pop {
+  opacity: 0;
+  animation: fb-m-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.fb-m-beam {
+  opacity: 0;
+  animation: fb-m-beam 1.25s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.fb-m-draw {
+  opacity: 0;
+  animation: fb-m-draw 0.42s ease-out both;
+}
+
+.fb-m-ring {
+  opacity: 0;
+  animation: fb-m-ring 1.1s ease-out both;
+}
+
+.fb-m-cursor {
+  opacity: 0;
+  animation: fb-m-cursor 1.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.fb-m-btn-click {
+  animation: fb-m-btn-click 0.36s ease-out both;
+}
+
+.fb-m-ripple {
+  opacity: 0;
+  animation: fb-m-ripple 0.7s ease-out both;
+}
+
+.fb-m-pulse {
+  animation: hot-badge-blink 1s ease-in-out infinite;
+}
+
+.fb-m-progress {
+  animation: fb-m-progress 6.6s linear forwards;
+}
+
+.fb-motion-stage.is-paused * {
+  animation-play-state: paused !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-auth-slide-right,
   .animate-auth-slide-left,
-  .animate-hot-blink {
-    animation: none;
+  .animate-hot-blink,
+  .fb-m-fade,
+  .fb-m-pop,
+  .fb-m-beam,
+  .fb-m-draw,
+  .fb-m-ring,
+  .fb-m-cursor,
+  .fb-m-btn-click,
+  .fb-m-ripple,
+  .fb-m-pulse,
+  .fb-m-progress {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+  .fb-m-beam,
+  .fb-m-ripple,
+  .fb-m-ring {
+    opacity: 0 !important;
   }
 }
 

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../store/apiClient.js';
 import { useBoardStore } from '../store/useBoardStore.js';
+import { AiMotionShowcase } from './AiMotionShowcase.jsx';
 
 const PRO_PLANS = [
   {
@@ -258,7 +259,7 @@ export function AiIntegrationModal({ open, onClose }) {
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-xl max-h-[90vh] flex flex-col rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] shadow-sm overflow-hidden"
+          className="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] shadow-sm overflow-hidden"
         >
           {/* Header */}
           <div className="px-5 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between gap-3">
@@ -298,7 +299,9 @@ export function AiIntegrationModal({ open, onClose }) {
           <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
             {paywallStep === 'pitch' ? (
               <>
-                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 space-y-1.5">
+                <AiMotionShowcase />
+
+                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3.5 space-y-1">
                   <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#1D4ED8]">
                     <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
                     <span>Hemat Berjam-jam Kerja Manual</span>
@@ -448,7 +451,7 @@ export function AiIntegrationModal({ open, onClose }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] shadow-sm overflow-hidden"
+        className="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] shadow-sm overflow-hidden"
       >
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between gap-3">
