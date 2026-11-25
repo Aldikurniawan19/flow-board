@@ -582,10 +582,12 @@ export const useBoardStore = create((set, get) => ({
     }
   },
 
-  deleteBoardById: async (boardId) => {
+  deleteBoardsByIds: async (boardIds) => {
     const { activeBoardId, boards } = get();
-    if (!boardId) return;
-    if (boards.length <= 1) {
+    const idSet = new Set((boardIds || []).filter((id) => boards.some((b) => b.id === id)));
+    if (idSet.size === 0) return;
+
+    if (boards.length - idSet.size < 1) {
       set({
         feedback: {
           type: 'info',
@@ -595,25 +597,51 @@ export const useBoardStore = create((set, get) => ({
       return;
     }
 
-    const target = boards.find((b) => b.id === boardId);
-    try {
-      await apiClient.deleteBoard(boardId);
-      const remaining = boards.filter((b) => b.id !== boardId);
-      set({
-        boards: remaining,
-        feedback: {
-          type: 'success',
-          message: target ? `Papan "${target.title}" berhasil dihapus.` : 'Papan kerja berhasil dihapus.',
-        },
-      });
-      if (boardId === activeBoardId && remaining.length > 0) {
-        await get().selectBoard(remaining[0].id);
+    const targets = boards.filter((b) => idSet.has(b.id));
+    const results = await Promise.allSettled(targets.map((b) => apiClient.deleteBoard(b.id)));
+    /** @type {Set<string>} */
+    const deletedIds = new Set();
+    let firstError = '';
+    results.forEach((res, idx) => {
+      if (res.status === 'fulfilled') {
+        deletedIds.add(targets[idx].id);
+      } else if (!firstError) {
+        firstError = res.reason?.message || 'Sebagian papan kerja gagal dihapus.';
       }
-    } catch (err) {
+    });
+
+    if (deletedIds.size === 0) {
       set({
-        feedback: { type: 'error', message: err?.message || 'Gagal menghapus papan kerja.' },
+        feedback: { type: 'error', message: firstError || 'Gagal menghapus papan kerja.' },
       });
+      return;
     }
+
+    const remaining = boards.filter((b) => !deletedIds.has(b.id));
+    const singleTarget = deletedIds.size === 1 ? targets.find((b) => deletedIds.has(b.id)) : null;
+    set({
+      boards: remaining,
+      feedback: firstError
+        ? {
+            type: 'error',
+            message: `${deletedIds.size} papan dihapus, namun terjadi kesalahan: ${firstError}`,
+          }
+        : {
+            type: 'success',
+            message: singleTarget
+              ? `Papan "${singleTarget.title}" berhasil dihapus.`
+              : `${deletedIds.size} papan kerja berhasil dihapus.`,
+          },
+    });
+
+    if (activeBoardId && deletedIds.has(activeBoardId) && remaining.length > 0) {
+      await get().selectBoard(remaining[0].id);
+    }
+  },
+
+  deleteBoardById: async (boardId) => {
+    if (!boardId) return;
+    await get().deleteBoardsByIds([boardId]);
   },
 
   deleteActiveBoard: async () => {

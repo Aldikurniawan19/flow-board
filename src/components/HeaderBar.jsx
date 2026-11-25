@@ -32,8 +32,9 @@ import { useBoardStore } from '../store/useBoardStore.js';
  */
 export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }) {
   const [boardMenuOpen, setBoardMenuOpen] = useState(false);
-  const [boardPendingDelete, setBoardPendingDelete] = useState(
-    /** @type {{ id: string, title: string } | null} */ (null),
+  const [selectedBoardIds, setSelectedBoardIds] = useState(/** @type {string[]} */ ([]));
+  const [boardsPendingDelete, setBoardsPendingDelete] = useState(
+    /** @type {Array<{ id: string, title: string }>} */ ([]),
   );
   const [deletingBoard, setDeletingBoard] = useState(false);
   const [toolsMenuHover, setToolsMenuHover] = useState(false);
@@ -54,7 +55,7 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
   const renameBoard = useBoardStore((s) => s.renameBoard);
   const selectBoard = useBoardStore((s) => s.selectBoard);
   const createNewBoard = useBoardStore((s) => s.createNewBoard);
-  const deleteBoardById = useBoardStore((s) => s.deleteBoardById);
+  const deleteBoardsByIds = useBoardStore((s) => s.deleteBoardsByIds);
   const saveActiveBoard = useBoardStore((s) => s.saveActiveBoard);
   const updateSettings = useBoardStore((s) => s.updateSettings);
   const toggleTheme = useBoardStore((s) => s.toggleTheme);
@@ -94,6 +95,7 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
       const target = /** @type {Node} */ (e.target);
       if (boardMenuRef.current && !boardMenuRef.current.contains(target)) {
         setBoardMenuOpen(false);
+        setSelectedBoardIds([]);
       }
       if (toolsMenuRef.current && !toolsMenuRef.current.contains(target)) {
         setToolsMenuHover(false);
@@ -104,9 +106,10 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
     function handleKeyDown(e) {
       if (e.key === 'Escape') {
         setBoardMenuOpen(false);
+        setSelectedBoardIds([]);
         setToolsMenuHover(false);
         setToolsMenuPinned(false);
-        setBoardPendingDelete(null);
+        setBoardsPendingDelete([]);
       }
     }
 
@@ -125,12 +128,39 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
       ? `Papan ${activeBoardIndex >= 0 ? activeBoardIndex + 1 : 1}/${boards.length}`
       : 'Papan (0)';
 
-  async function handleConfirmDeleteBoard() {
-    if (!boardPendingDelete || deletingBoard) return;
+  const maxDeletableCount = Math.max(0, boards.length - 1);
+  const validSelectedBoardIds = selectedBoardIds.filter((id) => boards.some((b) => b.id === id));
+
+  /** @param {string} id */
+  function toggleBoardSelection(id) {
+    setSelectedBoardIds((prev) => {
+      const valid = prev.filter((item) => boards.some((b) => b.id === item));
+      if (valid.includes(id)) {
+        return valid.filter((item) => item !== id);
+      }
+      if (valid.length >= maxDeletableCount) return valid;
+      return [...valid, id];
+    });
+  }
+
+  function handleSelectAllDeletable() {
+    if (maxDeletableCount <= 0) return;
+    if (validSelectedBoardIds.length >= maxDeletableCount) {
+      setSelectedBoardIds([]);
+      return;
+    }
+    // Prefer keeping the currently active board unselected while selecting all other boards
+    const nonActive = boards.filter((b) => b.id !== activeBoardId).map((b) => b.id);
+    setSelectedBoardIds(nonActive.slice(0, maxDeletableCount));
+  }
+
+  async function handleConfirmDeleteBoards() {
+    if (boardsPendingDelete.length === 0 || deletingBoard) return;
     setDeletingBoard(true);
     try {
-      await deleteBoardById(boardPendingDelete.id);
-      setBoardPendingDelete(null);
+      await deleteBoardsByIds(boardsPendingDelete.map((b) => b.id));
+      setBoardsPendingDelete([]);
+      setSelectedBoardIds([]);
     } finally {
       setDeletingBoard(false);
     }
@@ -155,7 +185,10 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
             title="Daftar papan kerja (Tab / Shift+Tab untuk pindah cepat)"
             onClick={() => {
               closeToolsMenu();
-              setBoardMenuOpen((v) => !v);
+              setBoardMenuOpen((v) => {
+                if (v) setSelectedBoardIds([]);
+                return !v;
+              });
             }}
             className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-2 py-1 text-xs font-medium text-[#475569] hover:bg-[#F1F5F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
           >
@@ -164,14 +197,15 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
           </button>
 
           {boardMenuOpen && (
-            <div className="absolute left-0 mt-1.5 w-64 rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] shadow-sm p-2 z-50">
-              <div className="flex items-center justify-between px-2 py-1.5 border-b border-[#E2E8F0] mb-1">
+            <div className="absolute left-0 mt-1.5 w-72 rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] shadow-sm p-2 z-50">
+              <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-[#E2E8F0] mb-1">
                 <span className="text-xs font-semibold text-[#0F172A]">Daftar Papan Kerja</span>
                 <button
                   type="button"
                   title="Buat papan kerja baru (N)"
                   onClick={() => {
                     setBoardMenuOpen(false);
+                    setSelectedBoardIds([]);
                     createNewBoard('');
                   }}
                   className="inline-flex items-center gap-1 text-xs font-medium text-[#1D4ED8] hover:text-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] rounded px-1"
@@ -184,24 +218,45 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
                 {boards.map((b, idx) => {
                   const isActive = b.id === activeBoardId;
                   const canDelete = boards.length > 1;
+                  const isChecked = validSelectedBoardIds.includes(b.id);
+                  const checkboxDisabled =
+                    !canDelete || (!isChecked && validSelectedBoardIds.length >= maxDeletableCount);
                   return (
                     <li
                       key={b.id}
                       className={`group flex items-center gap-1 rounded-lg transition-colors ${
-                        isActive
-                          ? 'bg-[#DBEAFE] text-[#1D4ED8]'
-                          : 'text-[#0F172A] hover:bg-[#F1F5F9]'
+                        isChecked
+                          ? 'bg-[#FEE2E2]/60 text-[#0F172A]'
+                          : isActive
+                            ? 'bg-[#DBEAFE] text-[#1D4ED8]'
+                            : 'text-[#0F172A] hover:bg-[#F1F5F9]'
                       }`}
                     >
+                      {boards.length > 1 && (
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          disabled={checkboxDisabled}
+                          aria-label={`Pilih papan ${b.title}`}
+                          title={
+                            checkboxDisabled
+                              ? 'Minimal 1 papan harus tersisa'
+                              : `Pilih "${b.title}" untuk hapus massal`
+                          }
+                          onChange={() => toggleBoardSelection(b.id)}
+                          className="ml-2 h-3.5 w-3.5 rounded border-[#CBD5E1] accent-[#DC2626] cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed shrink-0"
+                        />
+                      )}
                       <button
                         type="button"
                         onClick={() => {
                           setBoardMenuOpen(false);
+                          setSelectedBoardIds([]);
                           if (!isActive) selectBoard(b.id);
                         }}
-                        className={`flex-1 min-w-0 flex items-center gap-2 text-left pl-2.5 pr-1 py-2 text-xs ${
-                          isActive ? 'font-semibold' : ''
-                        }`}
+                        className={`flex-1 min-w-0 flex items-center gap-2 text-left ${
+                          boards.length > 1 ? 'pl-1.5' : 'pl-2.5'
+                        } pr-1 py-2 text-xs ${isActive ? 'font-semibold' : ''}`}
                       >
                         <span className="font-mono-tabular text-[11px] opacity-70 shrink-0">
                           {idx + 1}.
@@ -216,7 +271,8 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
                         onClick={(e) => {
                           e.stopPropagation();
                           setBoardMenuOpen(false);
-                          setBoardPendingDelete({ id: b.id, title: b.title });
+                          setSelectedBoardIds([]);
+                          setBoardsPendingDelete([{ id: b.id, title: b.title }]);
                         }}
                         className="mr-1 p-1.5 rounded-md text-[#475569] hover:bg-[#FEE2E2] hover:text-[#B91C1C] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#475569] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] shrink-0"
                       >
@@ -226,6 +282,40 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
                   );
                 })}
               </ul>
+              {validSelectedBoardIds.length > 0 && (
+                <div className="mt-1.5 pt-2 border-t border-[#E2E8F0] flex items-center justify-between gap-2 px-1">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllDeletable}
+                    className="text-[11px] font-medium text-[#1D4ED8] hover:text-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] rounded px-1 py-0.5"
+                  >
+                    {validSelectedBoardIds.length >= maxDeletableCount ? 'Batal Pilih' : 'Pilih Semua'}
+                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBoardIds([])}
+                      className="rounded-md border border-[#E2E8F0] bg-[#FFFFFF] px-2 py-1 text-[11px] font-medium text-[#475569] hover:bg-[#F1F5F9]"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targets = boards
+                          .filter((b) => validSelectedBoardIds.includes(b.id))
+                          .map((b) => ({ id: b.id, title: b.title }));
+                        setBoardMenuOpen(false);
+                        setBoardsPendingDelete(targets);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md bg-[#DC2626] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#B91C1C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#DC2626]"
+                    >
+                      <Trash2 className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                      <span>Hapus ({validSelectedBoardIds.length})</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -476,13 +566,13 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
       </div>
     </header>
 
-    {boardPendingDelete && (
+    {boardsPendingDelete.length > 0 && (
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-board-modal-title"
         onClick={() => {
-          if (!deletingBoard) setBoardPendingDelete(null);
+          if (!deletingBoard) setBoardsPendingDelete([]);
         }}
         className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F172A]/40 p-4"
       >
@@ -495,23 +585,44 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
               <div className="h-9 w-9 rounded-lg bg-[#FEE2E2] text-[#B91C1C] flex items-center justify-center shrink-0">
                 <AlertTriangle className="h-4.5 w-4.5" strokeWidth={1.75} aria-hidden="true" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <h2 id="delete-board-modal-title" className="text-sm font-semibold text-[#0F172A]">
-                  Hapus Papan Kerja?
+                  {boardsPendingDelete.length === 1
+                    ? 'Hapus Papan Kerja?'
+                    : `Hapus ${boardsPendingDelete.length} Papan Kerja?`}
                 </h2>
-                <p className="mt-1 text-xs text-[#475569] leading-relaxed">
-                  Apakah Anda yakin ingin menghapus papan{' '}
-                  <strong className="font-semibold text-[#0F172A]">
-                    &ldquo;{boardPendingDelete.title}&rdquo;
-                  </strong>
-                  ? Semua komponen di dalamnya akan dihapus permanen.
-                </p>
+                {boardsPendingDelete.length === 1 ? (
+                  <p className="mt-1 text-xs text-[#475569] leading-relaxed">
+                    Apakah Anda yakin ingin menghapus papan{' '}
+                    <strong className="font-semibold text-[#0F172A]">
+                      &ldquo;{boardsPendingDelete[0].title}&rdquo;
+                    </strong>
+                    ? Semua komponen di dalamnya akan dihapus permanen.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-1 text-xs text-[#475569] leading-relaxed">
+                      Apakah Anda yakin ingin menghapus{' '}
+                      <strong className="font-semibold text-[#0F172A]">
+                        {boardsPendingDelete.length} papan kerja
+                      </strong>{' '}
+                      berikut secara permanen?
+                    </p>
+                    <ul className="mt-2 max-h-28 overflow-y-auto rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1.5 space-y-1 text-[11px] text-[#0F172A]">
+                      {boardsPendingDelete.map((item) => (
+                        <li key={item.id} className="truncate">
+                          • {item.title}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
             </div>
             <button
               type="button"
               disabled={deletingBoard}
-              onClick={() => setBoardPendingDelete(null)}
+              onClick={() => setBoardsPendingDelete([])}
               aria-label="Tutup konfirmasi hapus"
               className="p-1 rounded-lg text-[#475569] hover:bg-[#F1F5F9] disabled:opacity-40"
             >
@@ -523,7 +634,7 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
             <button
               type="button"
               disabled={deletingBoard}
-              onClick={() => setBoardPendingDelete(null)}
+              onClick={() => setBoardsPendingDelete([])}
               className="rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3 py-1.5 text-xs font-medium text-[#475569] hover:bg-[#F1F5F9] disabled:opacity-40"
             >
               Batal
@@ -531,7 +642,7 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
             <button
               type="button"
               disabled={deletingBoard}
-              onClick={handleConfirmDeleteBoard}
+              onClick={handleConfirmDeleteBoards}
               className="inline-flex items-center gap-1.5 rounded-lg bg-[#DC2626] px-3.5 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#DC2626] disabled:opacity-50"
             >
               {deletingBoard ? (
@@ -539,7 +650,13 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
               ) : (
                 <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
               )}
-              <span>{deletingBoard ? 'Menghapus...' : 'Ya, Hapus'}</span>
+              <span>
+                {deletingBoard
+                  ? 'Menghapus...'
+                  : boardsPendingDelete.length === 1
+                    ? 'Ya, Hapus'
+                    : `Ya, Hapus (${boardsPendingDelete.length})`}
+              </span>
             </button>
           </div>
         </div>

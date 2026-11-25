@@ -492,6 +492,36 @@ describe('FlowBoard UI integration', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(screen.getByText('Papan 1/2')).toBeInTheDocument();
     });
+
+    // Bulk board delete: add a 3rd board, select 2 boards via checkboxes, and delete both in one click
+    act(() => {
+      useBoardStore.setState({
+        boards: [
+          { id: 'b3', title: 'Papan Baru 3', createdAt: '', updatedAt: '' },
+          { id: 'b4', title: 'Papan Dummy A', createdAt: '', updatedAt: '' },
+          { id: 'b1', title: 'Perancangan Sistem', createdAt: '', updatedAt: '' },
+        ],
+        activeBoardId: 'b3',
+      });
+    });
+    deleteBoardSpy.mockClear();
+    await user.click(screen.getByRole('button', { name: /Papan 1\/3/i }));
+    expect(screen.queryByRole('button', { name: 'Pilih Semua' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: 'Pilih papan Papan Dummy A' }));
+    expect(screen.getByRole('button', { name: 'Pilih Semua' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Pilih Semua' }));
+    // Last remaining board checkbox is automatically disabled to preserve at least 1 active board
+    expect(screen.getByRole('checkbox', { name: 'Pilih papan Papan Baru 3' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Hapus (2)' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Hapus 2 Papan Kerja?')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Ya, Hapus (2)' }));
+    await waitFor(() => {
+      expect(deleteBoardSpy).toHaveBeenCalledWith('b4');
+      expect(deleteBoardSpy).toHaveBeenCalledWith('b1');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByText('Papan 1/1')).toBeInTheDocument();
+    });
     // Sync same-type is ON by default: changing fill/size on one component updates same-type siblings,
     // and toggling it OFF isolates edits to only the selected component
     const sameTypePair = [
