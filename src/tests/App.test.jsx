@@ -463,6 +463,12 @@ describe('FlowBoard UI integration', () => {
       expect(screen.getByText('Papan 1/3')).toBeInTheDocument();
     });
 
+    // Clicking "Mulai Coret Bebas" activates the pen tool and hides the empty canvas modal
+    expect(screen.getByText('Papan kerja masih kosong')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Mulai Coret Bebas' }));
+    expect(useBoardStore.getState().activeTool).toBe('pen');
+    expect(screen.queryByText('Papan kerja masih kosong')).not.toBeInTheDocument();
+
     // Per-board delete button opens confirmation modal; cancel keeps board, confirm deletes it
     const deleteBoardSpy = vi.spyOn(apiClient, 'deleteBoard').mockResolvedValue({ ok: true });
     await user.click(screen.getByRole('button', { name: /Papan 1\/3/i }));

@@ -254,8 +254,10 @@ export function exportToSvgString(elements, options = {}) {
     }
 
     if (el.text) {
+      const deco = el.type === 'erd_chen_key_attr' ? ' text-decoration="underline"' : '';
+      const weight = el.type === 'erd_chen_entity' || el.type === 'erd_chen_weak_entity' ? ' font-weight="600"' : '';
       parts.push(
-        `<text x="${cx}" y="${cy + fontSize * 0.35}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSize}" fill="#0F172A">${escapeXml(el.text)}</text>`,
+        `<text x="${cx}" y="${cy + fontSize * 0.35}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSize}"${weight}${deco} fill="#0F172A">${escapeXml(el.text)}</text>`,
       );
     }
     if (rot) parts.push('</g>');

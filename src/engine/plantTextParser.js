@@ -2,7 +2,7 @@ import { layoutDiagramElements } from './autoLayout.js';
 import { getShapePorts } from './ports.js';
 
 /**
- * @typedef {'auto' | 'erd' | 'dfd' | 'class' | 'usecase' | 'sequence' | 'flowchart'} PlantDiagramKind
+ * @typedef {'auto' | 'erd' | 'erd_chen' | 'dfd' | 'class' | 'usecase' | 'sequence' | 'flowchart'} PlantDiagramKind
  * @typedef {{
  *   ok: true,
  *   kind: Exclude<PlantDiagramKind, 'auto'>,
@@ -18,7 +18,8 @@ import { getShapePorts } from './ports.js';
 export const MAX_PLANTTEXT_CHARS = 100_000;
 
 export const PLANT_KIND_LABELS = {
-  erd: 'ERD (Crow\'s Foot)',
+  erd: "ERD Relasional (Crow's Foot)",
+  erd_chen: 'ERD Konseptual (Peter Chen)',
   dfd: 'DFD (Gane & Sarson)',
   class: 'UML Class Diagram',
   usecase: 'UML Use Case Diagram',
@@ -29,7 +30,7 @@ export const PLANT_KIND_LABELS = {
 export const PLANTTEXT_EXAMPLES = [
   {
     id: 'erd',
-    label: 'ERD',
+    label: 'ERD Relasional',
     kind: /** @type {PlantDiagramKind} */ ('erd'),
     code: `@startuml
 hide circle
@@ -60,6 +61,79 @@ entity "order_items" as items <<weak>> {
 
 users ||--o{ orders : "membuat"
 orders ||--|{ items : "berisi"
+@enduml`,
+  },
+  {
+    id: 'erd_chen',
+    label: 'ERD (Chen)',
+    kind: /** @type {PlantDiagramKind} */ ('erd_chen'),
+    code: `@startuml
+title ERD Konseptual (Peter Chen) - Penyewaan Kendaraan
+
+entity "PELANGGAN" as pelanggan {
+  * **id_pelanggan** : INT <<PK>>
+  --
+  * nama_pelanggan : VARCHAR(100)
+  * email : VARCHAR(100)
+  * password : VARCHAR(255)
+  * no_telepon : VARCHAR(15)
+  * tanggal_registrasi : DATE
+}
+
+entity "KENDARAAN" as kendaraan {
+  * **id_kendaraan** : INT <<PK>>
+  --
+  * nama_kendaraan : VARCHAR(100)
+  * harga_sewa : DECIMAL
+  * gambar : VARCHAR(255)
+  * spesifikasi : TEXT
+  * tipe_kendaraan : VARCHAR(50)
+  * status_kendaraan : VARCHAR(30)
+}
+
+entity "SOPIR" as sopir {
+  * **id_sopir** : INT <<PK>>
+  --
+  * nama : VARCHAR(100)
+  * no_telepon : VARCHAR(15)
+  * status_sopir : VARCHAR(30)
+}
+
+entity "TRANSAKSI" as transaksi {
+  * **id_transaksi** : INT <<PK>>
+  --
+  * id_admin : INT <<FK>>
+  * id_pelanggan : INT <<FK>>
+  * id_kendaraan : INT <<FK>>
+  * tanggal_pemesanan : DATE
+  * tanggal_mulai : DATE
+  * tanggal_selesai : DATE
+  * status_transaksi : VARCHAR(30)
+  * total_bayar : DECIMAL
+}
+
+entity "PENUGASAN_SOPIR" as penugasan {
+  * **id_penugasan** : INT <<PK>>
+  --
+  * id_sopir : INT <<FK>>
+  * tgl_penugasan : DATE
+  * status_penugasan : VARCHAR(30)
+}
+
+entity "ADMIN" as admin {
+  * **id_admin** : INT <<PK>>
+  --
+  * nama : VARCHAR(100)
+  * email : VARCHAR(100)
+  * password : VARCHAR(255)
+  * role : VARCHAR(30)
+}
+
+pelanggan "1" -- "N" transaksi : "MELAKUKAN"
+kendaraan "1" -- "N" transaksi : "digunakan_dalam"
+transaksi "1" -- "1" penugasan : "mencatat"
+sopir "1" -- "N" penugasan : "ditugaskan_kepada"
+admin "1" -- "N" transaksi : "memproses"
 @enduml`,
   },
   {
@@ -335,6 +409,9 @@ export function detectPlantDiagramKind(lines, rawSource = '') {
     /^\s*entity\s+/im.test(joined) ||
     /(\|\||\|o|o\||\}\||\|\{|\}o|o\{)[-.]{1,4}(\|\||\|o|o\||\}\||\|\{|\}o|o\{)/m.test(joined)
   ) {
+    if (/peter\s*chen|\bchen\b|erd\s*konseptual|<<\s*chen\s*>>/i.test(rawSource)) {
+      return 'erd_chen';
+    }
     return 'erd';
   }
 
@@ -480,19 +557,53 @@ function stripQuotes(s) {
 }
 
 /**
- * Parse PlantUML ERD (entities + Crow's Foot relations).
+ * Extract entities (with PK/FK/multi/derived field metadata) and relations (Crow's Foot or Chen cardinality)
+ * from preprocessed PlantUML ERD lines. Shared by Relational (Crow's Foot) and Conceptual (Peter Chen) parsers.
  * @param {string[]} lines
- * @param {number} roughness
  */
-function parseErd(lines, roughness) {
-  /** @type {Map<string, { id: string, title: string, weak: boolean, fields: import('../types/schema.js').ErdField[] }>} */
+function extractErdGraph(lines) {
+  /**
+   * @typedef {{
+   *   id: string,
+   *   key: '' | 'PK' | 'FK' | 'PK,FK',
+   *   name: string,
+   *   type: string,
+   *   multi?: boolean,
+   *   derived?: boolean
+   * }} ParsedErdField
+   * @typedef {{ id: string, title: string, weak: boolean, fields: ParsedErdField[] }} ParsedErdEntity
+   * @typedef {{
+   *   from: string,
+   *   to: string,
+   *   leftTok: string,
+   *   rightTok: string,
+   *   leftCard: string,
+   *   rightCard: string,
+   *   dashed: boolean,
+   *   label: string
+   * }} ParsedErdRelation
+   */
+  /** @type {Map<string, ParsedErdEntity>} */
   const entities = new Map();
-  /** @type {Array<{ from: string, to: string, leftTok: string, rightTok: string, dashed: boolean, label: string }>} */
+  /** @type {ParsedErdRelation[]} */
   const relations = [];
 
-  /** @type {{ id: string, title: string, weak: boolean, fields: import('../types/schema.js').ErdField[] } | null} */
+  /** @type {ParsedErdEntity | null} */
   let current = null;
   let passedDivider = false;
+
+  /**
+   * Map a Crow's Foot token into a Peter Chen cardinality string.
+   * @param {string} tok
+   * @returns {'1' | 'N' | ''}
+   */
+  function crowToChenCard(tok) {
+    const t = tok.trim();
+    if (!t) return '';
+    if (t.includes('{') || t.includes('}')) return 'N';
+    if (t.includes('|') || t.includes('o')) return '1';
+    return '';
+  }
 
   for (const line of lines) {
     if (current) {
@@ -518,6 +629,8 @@ function parseErd(lines, roughness) {
       } else if (isMandatoryStar && !passedDivider && current.fields.length === 0) {
         key = 'PK';
       }
+      const multi = /<<\s*(?:multi|multivalued)\s*>>/i.test(clean);
+      const derived = /<<\s*derived\s*>>/i.test(clean);
       clean = clean.replace(/<<[^>]+>>|\((PK|FK|PK,\s*FK)\)/gi, '').trim();
       const colonIdx = clean.indexOf(':');
       const colNameRaw = cleanPlantLabel(
@@ -531,6 +644,8 @@ function parseErd(lines, roughness) {
           key,
           name: colNameRaw,
           type: colTypeRaw || 'VARCHAR',
+          multi,
+          derived,
         });
       }
       continue;
@@ -557,6 +672,53 @@ function parseErd(lines, roughness) {
       continue;
     }
 
+    // 1. Explicit Chen / UML cardinality relation: A "1" -- "N" B : "MELAKUKAN"
+    const chenRelMatch = line.match(
+      /^(?:"([^"]+)"|([A-Za-z0-9_]+))\s+"([^"]+)"\s*([-.\s]{2,6})\s*"([^"]+)"\s*(?:"([^"]+)"|([A-Za-z0-9_]+))(?:\s*:\s*(.+))?$/,
+    );
+    if (chenRelMatch) {
+      const from = chenRelMatch[1] || chenRelMatch[2];
+      const leftCard = chenRelMatch[3].trim();
+      const mid = chenRelMatch[4] || '--';
+      const rightCard = chenRelMatch[5].trim();
+      const to = chenRelMatch[6] || chenRelMatch[7];
+      const label = cleanPlantLabel(stripQuotes(chenRelMatch[8] || ''));
+
+      const cardToCrow = (/** @type {string} */ card, /** @type {'left' | 'right'} */ side) => {
+        if (/[*NMnm]|\.\./.test(card)) return side === 'left' ? '}o' : 'o{';
+        return '||';
+      };
+
+      if (!entities.has(from)) {
+        entities.set(from, {
+          id: crypto.randomUUID(),
+          title: from,
+          weak: false,
+          fields: [{ id: crypto.randomUUID(), key: 'PK', name: 'id', type: 'UUID' }],
+        });
+      }
+      if (!entities.has(to)) {
+        entities.set(to, {
+          id: crypto.randomUUID(),
+          title: to,
+          weak: false,
+          fields: [{ id: crypto.randomUUID(), key: 'PK', name: 'id', type: 'UUID' }],
+        });
+      }
+      relations.push({
+        from,
+        to,
+        leftTok: cardToCrow(leftCard, 'left'),
+        rightTok: cardToCrow(rightCard, 'right'),
+        leftCard,
+        rightCard,
+        dashed: mid.includes('.'),
+        label,
+      });
+      continue;
+    }
+
+    // 2. Crow's Foot or plain relation: A ||--o{ B : "label"
     const relMatch = line.match(
       /^(?:"([^"]+)"|([A-Za-z0-9_]+))\s*(\|\||\|o|o\||\}\||\|\{|\}o|o\{|\}|\||<)?([-.\s]{2,6})(\|\||\|o|o\||\}\||\|\{|\}o|o\{|\{|\||>)?\s*(?:"([^"]+)"|([A-Za-z0-9_]+))(?:\s*:\s*(.+))?$/,
     );
@@ -584,16 +746,38 @@ function parseErd(lines, roughness) {
           fields: [{ id: crypto.randomUUID(), key: 'PK', name: 'id', type: 'UUID' }],
         });
       }
+
+      /** @type {string} */
+      let leftCard = crowToChenCard(leftTok) || '1';
+      /** @type {string} */
+      const rightCard = crowToChenCard(rightTok) || 'N';
+      if (leftCard === 'N' && rightCard === 'N') {
+        leftCard = 'M';
+      }
+
       relations.push({
         from,
         to,
         leftTok,
         rightTok,
+        leftCard,
+        rightCard,
         dashed: mid.includes('.'),
         label,
       });
     }
   }
+
+  return { entities, relations };
+}
+
+/**
+ * Parse PlantUML ERD (entities + Crow's Foot relations).
+ * @param {string[]} lines
+ * @param {number} roughness
+ */
+function parseErd(lines, roughness) {
+  const { entities, relations } = extractErdGraph(lines);
 
   /** @type {import('../types/schema.js').BoardElement[]} */
   const nodes = [];
@@ -631,7 +815,7 @@ function parseErd(lines, roughness) {
       text: ent.title,
       fontSize: 14,
       fontFamily: roughness > 0 ? 'sketch' : 'sans',
-      fields: ent.fields,
+      fields: ent.fields.map(({ id, key, name, type }) => ({ id, key, name, type })),
     };
     nodes.push(el);
     nodeMap.set(alias, el);
@@ -654,6 +838,460 @@ function parseErd(lines, roughness) {
     .filter(Boolean);
 
   return [...nodes, .../** @type {import('../types/schema.js').BoardElement[]} */ (connectors)];
+}
+
+/**
+ * Parse PlantUML ERD into a Conceptual Peter Chen ERD:
+ * - Entities as rectangles (`erd_chen_entity` / `erd_chen_weak_entity`)
+ * - Relations as diamonds (`erd_chen_relation` / `erd_chen_id_relation`) with straight `1`/`N`/`M` lines
+ * - Attributes as ovals (`erd_chen_key_attr` underlined PK, `erd_chen_attribute`, multi, derived)
+ *   fanned outward in clean non-overlapping arcs around each entity.
+ * @param {string[]} lines
+ * @param {number} roughness
+ */
+function parseErdChen(lines, roughness) {
+  const { entities, relations } = extractErdGraph(lines);
+  const entEntries = Array.from(entities.entries());
+  if (entEntries.length === 0) return [];
+
+  /** @param {{ x: number, y: number, width: number, height: number }} a @param {{ x: number, y: number, width: number, height: number }} b @param {number} pad */
+  function boxesOverlap(a, b, pad) {
+    return (
+      a.x < b.x + b.width + pad &&
+      a.x + a.width + pad > b.x &&
+      a.y < b.y + b.height + pad &&
+      a.y + a.height + pad > b.y
+    );
+  }
+
+  /**
+   * Compute a continuous perimeter AnchorBinding on an element facing toward target (tx, ty).
+   * @param {import('../types/schema.js').BoardElement} el
+   * @param {number} tx
+   * @param {number} ty
+   * @returns {import('../types/schema.js').AnchorBinding}
+   */
+  function facingBinding(el, tx, ty) {
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+    const dx = tx - cx;
+    const dy = ty - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+
+    /** @type {import('../types/schema.js').PortSide} */
+    const side =
+      Math.abs(ux) >= Math.abs(uy)
+        ? ux >= 0
+          ? 'right'
+          : 'left'
+        : uy >= 0
+          ? 'bottom'
+          : 'top';
+
+    if (el.type.startsWith('erd_chen_') && el.type.includes('attr')) {
+      return {
+        elementId: el.id,
+        side,
+        rx: Number((0.5 + 0.5 * ux).toFixed(4)),
+        ry: Number((0.5 + 0.5 * uy).toFixed(4)),
+      };
+    }
+
+    if (el.type === 'erd_chen_relation' || el.type === 'erd_chen_id_relation') {
+      const denom = Math.abs(ux) + Math.abs(uy) || 1;
+      return {
+        elementId: el.id,
+        side,
+        rx: Number((0.5 + (0.5 * ux) / denom).toFixed(4)),
+        ry: Number((0.5 + (0.5 * uy) / denom).toFixed(4)),
+      };
+    }
+
+    // Rectangle perimeter intersection along ray from center
+    const hw = el.width / 2;
+    const hh = el.height / 2;
+    const tX = Math.abs(ux) > 1e-6 ? hw / Math.abs(ux) : Infinity;
+    const tY = Math.abs(uy) > 1e-6 ? hh / Math.abs(uy) : Infinity;
+    const t = Math.min(tX, tY);
+    const rx = Math.max(0, Math.min(1, 0.5 + (ux * t) / Math.max(1, el.width)));
+    const ry = Math.max(0, Math.min(1, 0.5 + (uy * t) / Math.max(1, el.height)));
+    return {
+      elementId: el.id,
+      side,
+      rx: Number(rx.toFixed(4)),
+      ry: Number(ry.toFixed(4)),
+    };
+  }
+
+  /**
+   * Build a clean straight Chen connector with exact perimeter bindings and optional cardinality label.
+   * @param {import('../types/schema.js').BoardElement} src
+   * @param {import('../types/schema.js').BoardElement} dst
+   * @param {import('../types/schema.js').AnchorBinding} startBinding
+   * @param {import('../types/schema.js').AnchorBinding} endBinding
+   * @param {string} label
+   * @param {boolean} dashed
+   * @returns {import('../types/schema.js').BoardElement}
+   */
+  function makeChenLine(src, dst, startBinding, endBinding, label, dashed) {
+    const sp = {
+      x: src.x + (startBinding.rx ?? 0.5) * src.width,
+      y: src.y + (startBinding.ry ?? 0.5) * src.height,
+    };
+    const ep = {
+      x: dst.x + (endBinding.rx ?? 0.5) * dst.width,
+      y: dst.y + (endBinding.ry ?? 0.5) * dst.height,
+    };
+    return {
+      id: crypto.randomUUID(),
+      type: 'connector',
+      x: sp.x,
+      y: sp.y,
+      width: ep.x - sp.x,
+      height: ep.y - sp.y,
+      strokeColor: '#0F172A',
+      fillColor: 'transparent',
+      strokeWidth: 1.5,
+      strokeStyle: dashed ? 'dashed' : 'solid',
+      roughness,
+      opacity: 1,
+      seed: nextSeed(),
+      text: label,
+      fontSize: 12,
+      fontFamily: roughness > 0 ? 'sketch' : 'sans',
+      routing: 'straight',
+      startMarker: 'none',
+      endMarker: 'none',
+      startBinding,
+      endBinding,
+    };
+  }
+
+  // Step 1: Arrange entities on a spacious 2-row (or multi-row) grid, placing the main hub in row 1
+  const degree = new Map(entEntries.map(([alias]) => [alias, 0]));
+  for (const r of relations) {
+    degree.set(r.from, (degree.get(r.from) || 0) + 1);
+    degree.set(r.to, (degree.get(r.to) || 0) + 1);
+  }
+
+  const totalEnts = entEntries.length;
+  const cols = totalEnts <= 2 ? totalEnts : totalEnts <= 4 ? 2 : 3;
+  const rows = Math.ceil(totalEnts / cols);
+
+  // Order entities: place highest-degree hub in the bottom-center (or bottom-left) row for clean radiating diamonds
+  const orderedAliases = entEntries.map(([alias]) => alias);
+  if (totalEnts >= 4) {
+    let hubAlias = orderedAliases[0];
+    let bestScore = -1;
+    for (const [alias, ent] of entEntries) {
+      const score = (degree.get(alias) || 0) * 10 + ent.fields.length;
+      if (score > bestScore) {
+        bestScore = score;
+        hubAlias = alias;
+      }
+    }
+    const hubSlot = Math.min(totalEnts - 1, cols + Math.floor(cols / 2));
+    const curHubIdx = orderedAliases.indexOf(hubAlias);
+    if (curHubIdx >= 0 && curHubIdx !== hubSlot) {
+      orderedAliases.splice(curHubIdx, 1);
+      orderedAliases.splice(hubSlot, 0, hubAlias);
+    }
+  }
+
+  const maxAttrs = Math.max(1, ...entEntries.map(([, e]) => e.fields.length));
+  const colPitch = maxAttrs >= 9 ? 620 : 540;
+  const rowPitch = maxAttrs >= 9 ? 430 : 370;
+
+  /** @type {Map<string, import('../types/schema.js').BoardElement>} */
+  const entityNodeMap = new Map();
+  /** @type {Map<string, { row: number, col: number }>} */
+  const entityGridPos = new Map();
+  /** @type {import('../types/schema.js').BoardElement[]} */
+  const entityNodes = [];
+
+  orderedAliases.forEach((alias, idx) => {
+    const ent = entities.get(alias);
+    if (!ent) return;
+    const row = Math.floor(idx / cols);
+    const col = idx % cols;
+    const width = Math.max(138, Math.min(220, Math.round(ent.title.length * 9.5 + 34)));
+    const height = 56;
+    const cx = 420 + col * colPitch;
+    const cy = 340 + row * rowPitch;
+    /** @type {import('../types/schema.js').BoardElement} */
+    const el = {
+      id: ent.id,
+      type: ent.weak ? 'erd_chen_weak_entity' : 'erd_chen_entity',
+      x: Math.round(cx - width / 2),
+      y: Math.round(cy - height / 2),
+      width,
+      height,
+      strokeColor: '#0F172A',
+      fillColor: '#FFFFFF',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness,
+      opacity: 1,
+      seed: nextSeed(),
+      text: ent.title,
+      fontSize: 13.5,
+      fontFamily: roughness > 0 ? 'sketch' : 'sans',
+    };
+    entityNodeMap.set(alias, el);
+    entityGridPos.set(alias, { row, col });
+    entityNodes.push(el);
+  });
+
+  // Step 2: Place Relation Diamonds midway between connected entities (with parallel-edge separation)
+  /** @type {Map<string, number[]>} */
+  const pairGroups = new Map();
+  relations.forEach((rel, idx) => {
+    const key = [rel.from, rel.to].sort().join('::');
+    const arr = pairGroups.get(key) || [];
+    arr.push(idx);
+    pairGroups.set(key, arr);
+  });
+
+  /** @type {import('../types/schema.js').BoardElement[]} */
+  const diamondNodes = [];
+  /** @type {import('../types/schema.js').BoardElement[]} */
+  const allConnectors = [];
+  /** @type {Map<string, Array<{ x: number, y: number }>>} */
+  const entityRelTargets = new Map(orderedAliases.map((a) => [a, []]));
+
+  relations.forEach((rel, idx) => {
+    const src = entityNodeMap.get(rel.from);
+    const dst = entityNodeMap.get(rel.to);
+    if (!src || !dst) return;
+
+    const srcEnt = entities.get(rel.from);
+    const dstEnt = entities.get(rel.to);
+    const isIdentifying = Boolean(srcEnt?.weak || dstEnt?.weak);
+
+    const sx = src.x + src.width / 2;
+    const sy = src.y + src.height / 2;
+    const dx = dst.x + dst.width / 2;
+    const dy = dst.y + dst.height / 2;
+    const dist = Math.hypot(dx - sx, dy - sy) || 1;
+    const perpX = -(dy - sy) / dist;
+    const perpY = (dx - sx) / dist;
+
+    const pairKey = [rel.from, rel.to].sort().join('::');
+    const group = pairGroups.get(pairKey) || [idx];
+    const slotInPair = group.indexOf(idx);
+    const pairOffset = (slotInPair - (group.length - 1) / 2) * 110;
+
+    const labelText = rel.label || 'terkait';
+    const dWidth = Math.max(132, Math.min(220, Math.round(labelText.length * 7.6 + 54)));
+    const dHeight = 68;
+
+    let dCx = (sx + dx) / 2 + perpX * pairOffset;
+    let dCy = (sy + dy) / 2 + perpY * pairOffset;
+
+    // Nudge perpendicular if diamond collides with any entity or previously placed diamond
+    const placedSoFar = [...entityNodes, ...diamondNodes];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidate = {
+        x: dCx - dWidth / 2,
+        y: dCy - dHeight / 2,
+        width: dWidth,
+        height: dHeight,
+      };
+      if (!placedSoFar.some((other) => boxesOverlap(candidate, other, 20))) break;
+      const sign = attempt % 2 === 0 ? 1 : -1;
+      const step = Math.ceil((attempt + 1) / 2) * 58;
+      dCx = (sx + dx) / 2 + perpX * (pairOffset + sign * step);
+      dCy = (sy + dy) / 2 + perpY * (pairOffset + sign * step);
+    }
+
+    /** @type {import('../types/schema.js').BoardElement} */
+    const diamond = {
+      id: crypto.randomUUID(),
+      type: isIdentifying ? 'erd_chen_id_relation' : 'erd_chen_relation',
+      x: Math.round(dCx - dWidth / 2),
+      y: Math.round(dCy - dHeight / 2),
+      width: dWidth,
+      height: dHeight,
+      strokeColor: '#0F172A',
+      fillColor: '#FFFFFF',
+      strokeWidth: 1.75,
+      strokeStyle: 'solid',
+      roughness,
+      opacity: 1,
+      seed: nextSeed(),
+      text: labelText,
+      fontSize: 12,
+      fontFamily: roughness > 0 ? 'sketch' : 'sans',
+    };
+    diamondNodes.push(diamond);
+
+    entityRelTargets.get(rel.from)?.push({ x: dCx, y: dCy });
+    entityRelTargets.get(rel.to)?.push({ x: dCx, y: dCy });
+
+    allConnectors.push(
+      makeChenLine(
+        src,
+        diamond,
+        facingBinding(src, dCx, dCy),
+        facingBinding(diamond, sx, sy),
+        rel.leftCard,
+        rel.dashed,
+      ),
+      makeChenLine(
+        diamond,
+        dst,
+        facingBinding(diamond, dx, dy),
+        facingBinding(dst, dCx, dCy),
+        rel.rightCard,
+        rel.dashed,
+      ),
+    );
+  });
+
+  // Step 3: Fan each entity's attribute ovals outward away from its relations
+  /** @type {import('../types/schema.js').BoardElement[]} */
+  const attrNodes = [];
+  const allStaticObstacles = [...entityNodes, ...diamondNodes];
+
+  for (const alias of orderedAliases) {
+    const ent = entities.get(alias);
+    const entityEl = entityNodeMap.get(alias);
+    const gPos = entityGridPos.get(alias);
+    if (!ent || !entityEl || !gPos || ent.fields.length === 0) continue;
+
+    const eCx = entityEl.x + entityEl.width / 2;
+    const eCy = entityEl.y + entityEl.height / 2;
+    const relTargets = entityRelTargets.get(alias) || [];
+
+    // Pick clearest outward fan direction: top row -> UP, bottom row -> DOWN (or away from relations)
+    const candidateDirs = [
+      { side: /** @type {const} */ ('top'), angle: -Math.PI / 2, bonus: gPos.row === 0 ? 1.4 : -0.4 },
+      { side: /** @type {const} */ ('bottom'), angle: Math.PI / 2, bonus: gPos.row === rows - 1 ? 1.4 : -0.4 },
+      { side: /** @type {const} */ ('left'), angle: Math.PI, bonus: gPos.col === 0 ? 0.6 : -0.6 },
+      { side: /** @type {const} */ ('right'), angle: 0, bonus: gPos.col === cols - 1 ? 0.6 : -0.6 },
+    ];
+
+    let bestDir = candidateDirs[0];
+    let bestDirScore = -Infinity;
+    for (const cand of candidateDirs) {
+      let minAngleGap = Math.PI;
+      for (const rt of relTargets) {
+        const relAng = Math.atan2(rt.y - eCy, rt.x - eCx);
+        let diff = Math.abs(cand.angle - relAng) % (Math.PI * 2);
+        if (diff > Math.PI) diff = Math.PI * 2 - diff;
+        if (diff < minAngleGap) minAngleGap = diff;
+      }
+      const score = minAngleGap + cand.bonus;
+      if (score > bestDirScore) {
+        bestDirScore = score;
+        bestDir = cand;
+      }
+    }
+
+    // Anchor all attribute rays cleanly on the chosen outward edge midpoint (just like textbook Chen ERDs)
+    /** @type {import('../types/schema.js').AnchorBinding} */
+    const hubBinding =
+      bestDir.side === 'top'
+        ? { elementId: entityEl.id, side: 'top', rx: 0.5, ry: 0 }
+        : bestDir.side === 'bottom'
+          ? { elementId: entityEl.id, side: 'bottom', rx: 0.5, ry: 1 }
+          : bestDir.side === 'left'
+            ? { elementId: entityEl.id, side: 'left', rx: 0, ry: 0.5 }
+            : { elementId: entityEl.id, side: 'right', rx: 1, ry: 0.5 };
+    const hubX = entityEl.x + (hubBinding.rx ?? 0.5) * entityEl.width;
+    const hubY = entityEl.y + (hubBinding.ry ?? 0.5) * entityEl.height;
+
+    const k = ent.fields.length;
+    const isVertFan = bestDir.side === 'top' || bestDir.side === 'bottom';
+    const arcSpan =
+      k <= 1
+        ? 0
+        : k <= 6
+          ? Math.min(Math.PI * 0.86, (k - 1) * 0.34)
+          : Math.min(Math.PI * 1.06, (k - 1) * 0.24);
+    const rxBase = isVertFan ? Math.max(195, k * 34) : Math.max(175, k * 24);
+    const ryBase = isVertFan ? Math.max(145, k * 19) : Math.max(185, k * 30);
+
+    ent.fields.forEach((field, fIdx) => {
+      const t = k <= 1 ? 0 : fIdx / (k - 1) - 0.5;
+      const angle = bestDir.angle + t * arcSpan;
+      // Stagger alternate ovals gently on large attribute fans (k >= 7) for crisp zero-overlap packing
+      const tierScale = k >= 7 && fIdx % 2 === 1 ? 1.28 : 1.0;
+
+      const attrType = field.key.includes('PK')
+        ? 'erd_chen_key_attr'
+        : field.multi
+          ? 'erd_chen_multi_attr'
+          : field.derived
+            ? 'erd_chen_derived_attr'
+            : 'erd_chen_attribute';
+
+      const w = Math.max(106, Math.min(184, Math.round(field.name.length * 7.6 + 28)));
+      const h = 40;
+
+      let ox = hubX + Math.cos(angle) * rxBase * tierScale - w / 2;
+      let oy = hubY + Math.sin(angle) * ryBase * tierScale - h / 2;
+
+      // Guarantee zero overlap with any existing entity, diamond, or previously placed attribute oval
+      const existing = [...allStaticObstacles, ...attrNodes];
+      const dirX = Math.cos(angle);
+      const dirY = Math.sin(angle);
+      for (let push = 0; push < 14; push += 1) {
+        const cand = { x: ox, y: oy, width: w, height: h };
+        if (!existing.some((other) => boxesOverlap(cand, other, 12))) break;
+        ox += dirX * 26;
+        oy += dirY * 22;
+      }
+
+      /** @type {import('../types/schema.js').BoardElement} */
+      const oval = {
+        id: crypto.randomUUID(),
+        type: attrType,
+        x: Math.round(ox),
+        y: Math.round(oy),
+        width: w,
+        height: h,
+        strokeColor: '#0F172A',
+        fillColor: '#FFFFFF',
+        strokeWidth: 1.5,
+        strokeStyle: attrType === 'erd_chen_derived_attr' ? 'dashed' : 'solid',
+        roughness,
+        opacity: 1,
+        seed: nextSeed(),
+        text: field.name,
+        fontSize: 12,
+        fontFamily: roughness > 0 ? 'sketch' : 'sans',
+      };
+      attrNodes.push(oval);
+
+      allConnectors.push(
+        makeChenLine(entityEl, oval, hubBinding, facingBinding(oval, hubX, hubY), '', false),
+      );
+    });
+  }
+
+  // Step 4: Normalize coordinates so top-left starts cleanly at (80, 80)
+  const allNodes = [...entityNodes, ...diamondNodes, ...attrNodes];
+  let minX = Infinity;
+  let minY = Infinity;
+  for (const n of allNodes) {
+    if (n.x < minX) minX = n.x;
+    if (n.y < minY) minY = n.y;
+  }
+  const shiftX = Math.round(80 - minX);
+  const shiftY = Math.round(80 - minY);
+  for (const n of allNodes) {
+    n.x += shiftX;
+    n.y += shiftY;
+  }
+  for (const c of allConnectors) {
+    c.x += shiftX;
+    c.y += shiftY;
+  }
+
+  return [...allNodes, ...allConnectors];
 }
 
 /**
@@ -1724,6 +2362,9 @@ export function parsePlantText(source, options = {}) {
   switch (kind) {
     case 'erd':
       elements = layoutDiagramElements(parseErd(lines, roughness), { direction: 'LR', kind });
+      break;
+    case 'erd_chen':
+      elements = parseErdChen(lines, roughness);
       break;
     case 'class':
       elements = layoutDiagramElements(parseClassDiagram(lines, roughness), { direction: 'TB', kind });

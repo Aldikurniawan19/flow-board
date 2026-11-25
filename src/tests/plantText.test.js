@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ElementSchema } from '../types/schema.js';
-import { orthoSegmentHitsRect } from '../engine/autoLayout.js';
+import { orthoSegmentHitsRect, rectsOverlap } from '../engine/autoLayout.js';
 import { rectsIntersect } from '../engine/geometry.js';
 import { getNormalizedRect, isConnectableElement } from '../engine/ports.js';
 import { computeConnectorPath } from '../engine/router.js';
@@ -11,7 +11,7 @@ import {
 } from '../engine/plantTextParser.js';
 
 describe('PlantText / PlantUML parser & symbol mapper', () => {
-  it('parses all 6 preset design diagrams into schema-valid FlowBoard elements', () => {
+  it('parses all preset design diagrams into schema-valid FlowBoard elements', () => {
     for (const example of PLANTTEXT_EXAMPLES) {
       const res = parsePlantText(example.code);
       expect(res.ok, `Example ${example.id} should parse cleanly`).toBe(true);
@@ -478,6 +478,93 @@ kurir ||--o{ pengiriman : "mengantar"
           expect(orthoSegmentHitsRect(pts[i], pts[i + 1], getNormalizedRect(t))).toBe(false);
         }
       }
+    }
+  });
+
+  it('generates Peter Chen conceptual ERD from both preset and Crow Foot entity syntax without overlaps', () => {
+    const chenPreset = PLANTTEXT_EXAMPLES.find((e) => e.id === 'erd_chen');
+    const presetRes = parsePlantText(chenPreset?.code || '');
+    expect(presetRes.ok).toBe(true);
+    if (!presetRes.ok) return;
+
+    expect(presetRes.kind).toBe('erd_chen');
+    expect(presetRes.kindLabel).toBe('ERD Konseptual (Peter Chen)');
+
+    const entities = presetRes.elements.filter((e) => e.type === 'erd_chen_entity');
+    const relations = presetRes.elements.filter((e) => e.type === 'erd_chen_relation');
+    const keyAttrs = presetRes.elements.filter((e) => e.type === 'erd_chen_key_attr');
+    const attrs = presetRes.elements.filter((e) => e.type === 'erd_chen_attribute');
+    const connectors = presetRes.elements.filter((e) => e.type === 'connector');
+
+    expect(entities).toHaveLength(6);
+    expect(relations).toHaveLength(5);
+    expect(keyAttrs).toHaveLength(6);
+    expect(attrs.length).toBeGreaterThanOrEqual(20);
+    expect(connectors.every((c) => c.routing === 'straight')).toBe(true);
+    expect(connectors.some((c) => c.text === '1')).toBe(true);
+    expect(connectors.some((c) => c.text === 'N')).toBe(true);
+
+    const presetShapes = presetRes.elements.filter((e) => isConnectableElement(e));
+    for (let i = 0; i < presetShapes.length; i += 1) {
+      for (let j = i + 1; j < presetShapes.length; j += 1) {
+        expect(
+          rectsOverlap(getNormalizedRect(presetShapes[i]), getNormalizedRect(presetShapes[j]), 10),
+          `Chen shapes "${presetShapes[i].text}" and "${presetShapes[j].text}" must not overlap`,
+        ).toBe(false);
+      }
+    }
+
+    // Converting standard Crow's Foot entity code (including parallel relations & special attr stereotypes)
+    const crowFootCode = `@startuml
+entity "PELANGGAN" as pelanggan {
+  * **id_pelanggan** : INT <<PK>>
+  --
+  * nama_lengkap : VARCHAR(100)
+  * no_telepon : VARCHAR(15) <<multi>>
+  * usia : INT <<derived>>
+}
+
+entity "PENGIRIMAN" as pengiriman {
+  * **no_resi** : VARCHAR(20) <<PK>>
+  --
+  * id_pengirim : INT <<FK>>
+  * id_penerima : INT <<FK>>
+  * total_biaya : DECIMAL(12,2)
+}
+
+pelanggan ||--o{ pengiriman : "mengirim (id_pengirim)"
+pelanggan ||--o{ pengiriman : "menerima (id_penerima)"
+@enduml`;
+
+    const converted = parsePlantText(crowFootCode, { kind: 'erd_chen' });
+    expect(converted.ok).toBe(true);
+    if (!converted.ok) return;
+
+    expect(converted.kind).toBe('erd_chen');
+    const convEntities = converted.elements.filter((e) => e.type === 'erd_chen_entity');
+    const convRelations = converted.elements.filter((e) => e.type === 'erd_chen_relation');
+    const convKeyAttrs = converted.elements.filter((e) => e.type === 'erd_chen_key_attr');
+    const convMultiAttrs = converted.elements.filter((e) => e.type === 'erd_chen_multi_attr');
+    const convDerivedAttrs = converted.elements.filter((e) => e.type === 'erd_chen_derived_attr');
+    const convConns = converted.elements.filter((e) => e.type === 'connector');
+
+    expect(convEntities).toHaveLength(2);
+    expect(convRelations).toHaveLength(2);
+    expect(convRelations.map((r) => r.text)).toEqual(['mengirim (id_pengirim)', 'menerima (id_penerima)']);
+    expect(convKeyAttrs.map((a) => a.text)).toEqual(['id_pelanggan', 'no_resi']);
+    expect(convMultiAttrs.map((a) => a.text)).toEqual(['no_telepon']);
+    expect(convDerivedAttrs.map((a) => a.text)).toEqual(['usia']);
+    expect(convConns.filter((c) => c.text === '1')).toHaveLength(2);
+    expect(convConns.filter((c) => c.text === 'N')).toHaveLength(2);
+
+    const convShapes = converted.elements.filter((e) => isConnectableElement(e));
+    for (let i = 0; i < convShapes.length; i += 1) {
+      for (let j = i + 1; j < convShapes.length; j += 1) {
+        expect(rectsOverlap(getNormalizedRect(convShapes[i]), getNormalizedRect(convShapes[j]), 10)).toBe(false);
+      }
+    }
+    for (const el of converted.elements) {
+      expect(ElementSchema.safeParse(el).success).toBe(true);
     }
   });
 });

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Code2, Layers, Pencil } from 'lucide-react';
 import { STARTER_TEMPLATES } from '../constants/templates.js';
 import { useBoardStore } from '../store/useBoardStore.js';
@@ -6,11 +7,15 @@ import { useBoardStore } from '../store/useBoardStore.js';
  * @param {{ onOpenPlantText: () => void }} props
  */
 export function EmptyCanvasOverlay({ onOpenPlantText }) {
+  const activeBoardId = useBoardStore((s) => s.activeBoardId);
   const elementsCount = useBoardStore((s) => s.elements.length);
   const applyTemplate = useBoardStore((s) => s.applyTemplate);
   const setActiveTool = useBoardStore((s) => s.setActiveTool);
+  const [dismissedForBoardId, setDismissedForBoardId] = useState(
+    /** @type {string | null | undefined} */ (undefined),
+  );
 
-  if (elementsCount > 0) return null;
+  if (elementsCount > 0 || dismissedForBoardId === activeBoardId) return null;
 
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 z-10">
@@ -52,7 +57,10 @@ export function EmptyCanvasOverlay({ onOpenPlantText }) {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTool('pen')}
+            onClick={() => {
+              setActiveTool('pen');
+              setDismissedForBoardId(activeBoardId);
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1E40AF]"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
