@@ -377,19 +377,40 @@ export function renderCanvasScene(canvas, state) {
   const dpr = window.devicePixelRatio || 1;
   const cssW = canvas.clientWidth;
   const cssH = canvas.clientHeight;
-  if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
+
+  // Supersample the backing buffer at low zoom (< 85%) so small glyphs remain sharp on 1x/1.25x screens
+  const targetScale =
+    state.camera.zoom < 0.85 ? Math.max(dpr, 2.25) : Math.max(dpr, dpr < 1.5 ? 1.5 : dpr);
+  const maxDim = Math.max(cssW, cssH, 1);
+  const maxSafeScale = Math.max(dpr, 4096 / maxDim);
+  const renderScale = Math.min(targetScale, maxSafeScale, 2.5);
+
+  const targetW = Math.round(cssW * renderScale);
+  const targetH = Math.round(cssH * renderScale);
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW;
+    canvas.height = targetH;
   }
 
   ctx.save();
-  ctx.scale(dpr, dpr);
+  ctx.scale(renderScale, renderScale);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  const extCtx = /** @type {CanvasRenderingContext2D & { textRendering?: string }} */ (ctx);
+  if ('textRendering' in extCtx) {
+    extCtx.textRendering = 'geometricPrecision';
+  }
+
   ctx.fillStyle = isDark ? DARK_CANVAS_BG : UI_TOKENS.bgCanvas;
   ctx.fillRect(0, 0, cssW, cssH);
   drawGrid(ctx, cssW, cssH, state.camera, state.settings.gridMode, isDark);
 
+  // Snap translation to backing pixels to prevent subpixel text/line blur at low zoom
+  const camX = Math.round(state.camera.x * renderScale) / renderScale;
+  const camY = Math.round(state.camera.y * renderScale) / renderScale;
+
   // Enter world space
-  ctx.translate(state.camera.x, state.camera.y);
+  ctx.translate(camX, camY);
   ctx.scale(state.camera.zoom, state.camera.zoom);
 
   const rc = rough.canvas(canvas);
