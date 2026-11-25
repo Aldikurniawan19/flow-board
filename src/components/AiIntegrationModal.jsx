@@ -73,8 +73,8 @@ export function AiIntegrationModal({ open, onClose }) {
     2,
   );
 
-  const samplePromptDfd = `Baca panduan tool di ${llmsTxtUrl} lalu buatkan DFD Level 1 sistem pengiriman barang dan berikan link FlowBoard yang langsung bisa saya klik dan edit.`;
-  const samplePromptErd = `Baca panduan tool di ${llmsTxtUrl} lalu buatkan ERD Konseptual (Peter Chen) sistem penyewaan kendaraan lengkap dengan atribut oval dan kardinalitas 1/N, lalu berikan link FlowBoard-nya.`;
+  const samplePromptDfd = `Baca panduan tool di ${llmsTxtUrl} lalu buatkan DFD Level 1 sistem pengiriman barang. Berikan tautan Markdown yang bisa langsung diklik (format [Buka Diagram di FlowBoard](url) tanpa spasi/enter di dalam URL) agar langsung terbuka di FlowBoard.`;
+  const samplePromptErd = `Baca panduan tool di ${llmsTxtUrl} lalu buatkan ERD Konseptual (Peter Chen) sistem penyewaan kendaraan lengkap dengan atribut oval dan kardinalitas 1/N. Berikan tautan Markdown yang bisa langsung diklik (format [Buka Diagram di FlowBoard](url)) agar langsung terbuka di FlowBoard.`;
 
   useEffect(() => {
     if (!open || !user) return;

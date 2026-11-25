@@ -18,19 +18,23 @@ FlowBoard is an interactive Excalidraw + Draw.io hybrid web application that tur
 ---
 
 ## Method 1 (Works in ANY AI — Zero Setup): Instant Deep-Link URL
-When a user asks you to create a diagram using FlowBoard, construct a clickable Markdown link with URL-encoded query parameters:
+When a user asks you to create a diagram using FlowBoard:
+1. If you have HTTP/tool access, prefer calling `POST https://flow-board-dun.vercel.app/api/public/drafts` with JSON `{ "title": "...", "kind": "dfd", "code": "@startuml\n...\n@enduml" }` to get a **short** link `https://flow-board-dun.vercel.app/?draft=<id>` (valid 30 days, no API key required).
+2. Otherwise, construct a **clickable Markdown link** (NEVER output a raw bare 1000+ char URL as plain text, because browsers may treat copy-pasted long URLs as a Google search):
 
-```
-https://flow-board-dun.vercel.app/?kind=<KIND>&title=<URL_ENCODED_TITLE>&code=<URL_ENCODED_PLANTUML>
+```markdown
+[Buka & Edit Diagram di FlowBoard](https://flow-board-dun.vercel.app/?kind=<KIND>&title=<URL_ENCODED_TITLE>&code=<URL_ENCODED_PLANTUML>)
 ```
 
 Parameters:
 - `kind`: `auto`, `dfd`, `erd`, `erd_chen`, `class`, `usecase`, `sequence`, or `flowchart`
-- `title`: Human-readable diagram title (URL-encoded)
-- `code`: Complete `@startuml ... @enduml` PlantUML source (URL-encoded via standard percent-encoding, e.g. newline `%0A`, space `%20`, quotes `%22`)
+- `title`: Human-readable diagram title (URL-encoded; always encode `(` as `%28` and `)` as `%29` so Markdown link parsing never breaks)
+- `code`: Complete `@startuml ... @enduml` PlantUML source (URL-encoded via standard percent-encoding, e.g. newline `%0A`, space `%20`, quotes `%22`, `(` `%28`, `)` `%29`, no raw spaces or line breaks)
 - `renderMode` (optional): `clean` (technical, default) or `sketch` (hand-drawn)
 
-Alternatively, if you have HTTP access, POST to `https://flow-board-dun.vercel.app/api/public/drafts` with JSON `{ "title": "...", "kind": "dfd", "code": "@startuml\n...\n@enduml" }` to get a short link `https://flow-board-dun.vercel.app/?draft=<id>` (valid 30 days, no API key required).
+IMPORTANT formatting rule for your reply:
+- ALWAYS format the URL as a single-line clickable Markdown link `[Buka Diagram di FlowBoard](https://...)` with zero spaces or line breaks inside the URL.
+- Also provide the plain `@startuml ... @enduml` code block below as a fallback in case the user prefers pasting it into `Menu -> PlantText`.
 
 When the user clicks the link, FlowBoard opens immediately with the fully rendered, editable diagram on the canvas (works both for logged-in users and guest preview).
 
