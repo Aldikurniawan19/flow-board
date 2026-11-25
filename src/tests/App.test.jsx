@@ -321,13 +321,62 @@ describe('FlowBoard UI integration', () => {
     expect(updatedB?.width).toBe(240);
     expect(updatedB?.height).toBe(120);
 
-    // Multi-select nodeA (reference) + nodeC and equalize both width & height in 1 click
+    // Multi-select via Ctrl+Click toggles components into and out of selection
+    const canvasEl = screen.getByLabelText('Kanvas papan tulis FlowBoard');
+    canvasEl.setPointerCapture = vi.fn();
+    canvasEl.releasePointerCapture = vi.fn();
+    canvasEl.hasPointerCapture = vi.fn(() => false);
     act(() => {
-      useBoardStore.getState().setSelectedIds([nodeA.id, nodeC.id]);
+      useBoardStore.getState().setSelectedIds([nodeA.id]);
+      useBoardStore.getState().setCamera({ x: 0, y: 0, zoom: 1 });
     });
+    const nodeCCenterX = nodeC.x + nodeC.width / 2;
+    const nodeCCenterY = nodeC.y + nodeC.height / 2;
+    act(() => {
+      canvasEl.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: nodeCCenterX,
+          clientY: nodeCCenterY,
+          ctrlKey: true,
+          button: 0,
+        }),
+      );
+      canvasEl.dispatchEvent(
+        new MouseEvent('pointerup', {
+          bubbles: true,
+          cancelable: true,
+          clientX: nodeCCenterX,
+          clientY: nodeCCenterY,
+          ctrlKey: true,
+          button: 0,
+        }),
+      );
+    });
+    expect(useBoardStore.getState().selectedIds).toEqual([nodeA.id, nodeC.id]);
+
+    // Equalize both width & height of the Ctrl+Click multi-selected components in 1 click
     await user.click(screen.getByRole('button', { name: 'Samakan L & T' }));
     const updatedC = useBoardStore.getState().elements.find((el) => el.id === nodeC.id);
     expect(updatedC?.width).toBe(240);
     expect(updatedC?.height).toBe(120);
+
+    // Ctrl+Click again on nodeC removes it from the selection while keeping nodeA selected
+    const updatedCCenterX = (updatedC?.x ?? nodeC.x) + (updatedC?.width ?? nodeC.width) / 2;
+    const updatedCCenterY = (updatedC?.y ?? nodeC.y) + (updatedC?.height ?? nodeC.height) / 2;
+    act(() => {
+      canvasEl.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: updatedCCenterX,
+          clientY: updatedCCenterY,
+          ctrlKey: true,
+          button: 0,
+        }),
+      );
+    });
+    expect(useBoardStore.getState().selectedIds).toEqual([nodeA.id]);
   }, 20000);
 });

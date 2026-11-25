@@ -130,6 +130,10 @@ export function ZoomStatusBar() {
                 <dd className="font-mono-tabular text-[#0F172A]">V / H / Spasi</dd>
               </div>
               <div className="flex justify-between">
+                <dt>Pilih Banyak</dt>
+                <dd className="font-mono-tabular text-[#0F172A]">Ctrl+Klik / Shift+Klik</dd>
+              </div>
+              <div className="flex justify-between">
                 <dt>Pena / Stabilo / Hapus</dt>
                 <dd className="font-mono-tabular text-[#0F172A]">P / M / E</dd>
               </div>

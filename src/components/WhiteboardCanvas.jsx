@@ -443,8 +443,10 @@ export function WhiteboardCanvas() {
       return;
     }
 
-    // Select mode: check selected connector endpoints or resize handles first
-    if (store.selectedIds.length === 1) {
+    const isMultiSelectMod = e.shiftKey || e.ctrlKey || e.metaKey;
+
+    // Select mode: check selected connector endpoints or resize handles first (skip when Ctrl/Cmd multi-selecting)
+    if (store.selectedIds.length === 1 && !(e.ctrlKey || e.metaKey)) {
       const sel = elementsById.get(store.selectedIds[0]);
       if (sel && !sel.locked) {
         if (sel.type === 'connector') {
@@ -538,7 +540,7 @@ export function WhiteboardCanvas() {
     const hit = findTopmostElementAtPoint(world, store.elements, elementsById, 8 / store.camera.zoom);
     if (hit) {
       let nextSelected = store.selectedIds;
-      if (e.shiftKey) {
+      if (isMultiSelectMod) {
         nextSelected = store.selectedIds.includes(hit.id)
           ? store.selectedIds.filter((id) => id !== hit.id)
           : [...store.selectedIds, hit.id];
@@ -546,6 +548,10 @@ export function WhiteboardCanvas() {
         nextSelected = [hit.id];
       }
       store.setSelectedIds(nextSelected);
+
+      if (!nextSelected.includes(hit.id)) {
+        return;
+      }
 
       const movable = nextSelected
         .map((id) => elementsById.get(id))
@@ -572,10 +578,11 @@ export function WhiteboardCanvas() {
     }
 
     // Clicked empty canvas -> marquee box selection
-    if (!e.shiftKey) {
+    const baseSelectedIds = isMultiSelectMod ? store.selectedIds : [];
+    if (!isMultiSelectMod) {
       store.setSelectedIds([]);
     }
-    interactionRef.current = { mode: 'marquee', startWorld: world };
+    interactionRef.current = { mode: 'marquee', startWorld: world, baseSelectedIds };
     setMarquee({ x: world.x, y: world.y, width: 0, height: 0 });
   }
 
@@ -901,7 +908,8 @@ export function WhiteboardCanvas() {
       const ids = store.elements
         .filter((el) => rectsIntersect(rect, getElementBounds(el, map)))
         .map((el) => el.id);
-      store.setSelectedIds(ids);
+      const base = interaction.baseSelectedIds || [];
+      store.setSelectedIds(base.length > 0 ? Array.from(new Set([...base, ...ids])) : ids);
     }
   }
 
