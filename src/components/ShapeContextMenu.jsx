@@ -21,6 +21,9 @@ const CATEGORY_SHORT_LABELS = {
  *   containerHeight: number,
  *   currentType: string,
  *   selectedCount: number,
+ *   sameTypeCount?: number,
+ *   syncSameType?: boolean,
+ *   onToggleSyncSameType?: () => void,
  *   onSelectShape: (targetType: string) => void,
  *   onClose: () => void
  * }} props
@@ -32,6 +35,9 @@ export function ShapeContextMenu({
   containerHeight,
   currentType,
   selectedCount,
+  sameTypeCount = 1,
+  syncSameType = true,
+  onToggleSyncSameType,
   onSelectShape,
   onClose,
 }) {
@@ -111,6 +117,34 @@ export function ShapeContextMenu({
           <X className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
         </button>
       </div>
+
+      {sameTypeCount > 1 && onToggleSyncSameType && (
+        <div className="px-3 py-1.5 border-b border-[#E2E8F0] flex items-center justify-between gap-2 text-[11px]">
+          <span className="text-[#475569]">
+            Sinkron sejenis (<strong className="font-mono-tabular text-[#0F172A]">{sameTypeCount}</strong>)
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={syncSameType}
+            aria-label="Sinkron ganti bentuk ke komponen sejenis"
+            title={syncSameType ? 'Nonaktifkan sinkron sejenis' : 'Aktifkan sinkron sejenis'}
+            onClick={onToggleSyncSameType}
+            className={`relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+              syncSameType
+                ? 'border-transparent bg-[#1D4ED8]'
+                : 'border-[#CBD5E1] bg-[#E2E8F0]'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`pointer-events-none inline-block h-3 w-3 rounded-full bg-white shadow-xs transition-transform duration-200 ${
+                syncSameType ? 'translate-x-[15px]' : 'translate-x-[2px]'
+              }`}
+            />
+          </button>
+        </div>
+      )}
 
       {/* Search & Category Pills */}
       <div className="p-2 border-b border-[#E2E8F0] space-y-2">

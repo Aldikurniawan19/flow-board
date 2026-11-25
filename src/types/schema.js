@@ -29,6 +29,7 @@ import { z } from 'zod';
  * @property {GridMode} gridMode
  * @property {boolean} snapToGrid
  * @property {boolean} autoCorrectShapes
+ * @property {boolean} syncSameType
  *
  * @typedef {object} BoardElement
  * @property {string} id
@@ -218,6 +219,7 @@ export const BoardSettingsSchema = z.object({
   gridMode: z.enum(['dots', 'lines', 'none']).default('dots'),
   snapToGrid: z.boolean().default(true),
   autoCorrectShapes: z.boolean().default(true),
+  syncSameType: z.boolean().default(true),
 });
 
 export const BoardDocumentSchema = z.object({
@@ -228,6 +230,7 @@ export const BoardDocumentSchema = z.object({
     gridMode: 'dots',
     snapToGrid: true,
     autoCorrectShapes: true,
+    syncSameType: true,
   }),
   elements: z.array(ElementSchema).max(5000),
 });

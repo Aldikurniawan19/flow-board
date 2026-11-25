@@ -195,13 +195,22 @@ export function InspectorPanel({ open, onToggle }) {
   const sharedWidth = getSharedValue(resizableElements, (e) => Math.round(getNormalizedRect(e).width));
   const sharedHeight = getSharedValue(resizableElements, (e) => Math.round(getNormalizedRect(e).height));
 
+  const syncSameType = settings.syncSameType !== false;
+  const selectedTypes = new Set(selectedElements.map((e) => e.type));
+  const sameTypeTargetCount = elements.filter(
+    (e) => selectedTypes.has(e.type) && !e.locked,
+  ).length;
+
   /**
    * Capture each selected resizable element's aspect ratio at focus start so mid-typing
    * intermediate digits (e.g. "24" while typing "240") never distort the locked ratio.
    */
   function startDimensionSession() {
     const ratios = new Map();
-    for (const el of resizableElements) {
+    const candidates = syncSameType
+      ? elements.filter((el) => selectedTypes.has(el.type) && el.type !== 'connector' && el.type !== 'freehand')
+      : resizableElements;
+    for (const el of candidates) {
       const rect = getNormalizedRect(el);
       ratios.set(el.id, Math.max(1, rect.width) / Math.max(1, rect.height));
     }
@@ -236,7 +245,7 @@ export function InspectorPanel({ open, onToggle }) {
 
         return buildSizePatch(el, nextW, nextH);
       },
-      { skipHistory },
+      { skipHistory, syncSameType: true },
     );
     if (useSession) {
       dimSessionRef.current.historyCommitted = true;
@@ -416,6 +425,31 @@ export function InspectorPanel({ open, onToggle }) {
                   className="h-4 w-4 accent-[#1D4ED8]"
                 />
               </label>
+              <div
+                title="Saat aktif, perubahan gaya, ukuran, atau bentuk otomatis diterapkan ke semua komponen sejenis di papan ini"
+                className="flex items-center justify-between py-1 text-[#0F172A]"
+              >
+                <span>Sinkron Komponen Sejenis</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={syncSameType}
+                  aria-label="Sinkron Komponen Sejenis"
+                  onClick={() => updateSettings({ syncSameType: !syncSameType })}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+                    syncSameType
+                      ? 'border-transparent bg-[#1D4ED8]'
+                      : 'border-[#CBD5E1] bg-[#E2E8F0]'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow-xs transition-transform duration-200 ${
+                      syncSameType ? 'translate-x-[17px]' : 'translate-x-[2px]'
+                    }`}
+                  />
+                </button>
+              </div>
               <div className="pt-2 border-t border-[#E2E8F0] space-y-2">
                 <span className="block font-semibold text-[#0F172A]">Rapikan Tata Letak</span>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -480,6 +514,55 @@ export function InspectorPanel({ open, onToggle }) {
               >
                 <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
               </button>
+            </div>
+
+            {/* Sync same-type toggle (default ON, toggleable per board) */}
+            <div
+              className={`rounded-lg border px-2.5 py-2 transition-colors ${
+                syncSameType
+                  ? 'border-[#1D4ED8]/30 bg-[#EFF6FF]'
+                  : 'border-[#E2E8F0] bg-[#F8FAFC]'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-[#0F172A] flex items-center gap-1.5">
+                    <span>Sinkron Sejenis</span>
+                    {sameTypeTargetCount > 1 && (
+                      <span className="rounded bg-[#FFFFFF] border border-[#E2E8F0] px-1.5 py-0.5 text-[10px] font-mono-tabular text-[#475569]">
+                        {sameTypeTargetCount}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={syncSameType}
+                  aria-label="Sinkron perubahan ke komponen sejenis"
+                  title={syncSameType ? 'Nonaktifkan sinkron komponen sejenis' : 'Aktifkan sinkron komponen sejenis'}
+                  onClick={() => updateSettings({ syncSameType: !syncSameType })}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+                    syncSameType
+                      ? 'border-transparent bg-[#1D4ED8]'
+                      : 'border-[#CBD5E1] bg-[#E2E8F0]'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow-xs transition-transform duration-200 ${
+                      syncSameType ? 'translate-x-[17px]' : 'translate-x-[2px]'
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-[#475569] leading-snug">
+                {syncSameType
+                  ? sameTypeTargetCount > 1
+                    ? `Ubah warna, ukuran, gaya, atau bentuk ikut menerapkan ke semua ${sameTypeTargetCount} komponen sejenis.`
+                    : 'Aktif: komponen sejenis lain di papan ini ikut berubah saat diubah.'
+                  : 'Mati: perubahan hanya berlaku untuk komponen yang dipilih.'}
+              </p>
             </div>
 
             {isMulti && (
@@ -841,8 +924,9 @@ export function InspectorPanel({ open, onToggle }) {
                         key={r.id}
                         type="button"
                         onClick={() =>
-                          updateSelectedElements((el) =>
-                            el.type === 'connector' ? { routing: r.id } : null,
+                          updateSelectedElements(
+                            (el) => (el.type === 'connector' ? { routing: r.id } : null),
+                            { syncSameType: true },
                           )
                         }
                         className={`py-1.5 rounded-md border font-medium ${
@@ -864,8 +948,9 @@ export function InspectorPanel({ open, onToggle }) {
                   mixed={sharedStartMarker === '__mixed__'}
                   direction="start"
                   onChange={(val) =>
-                    updateSelectedElements((el) =>
-                      el.type === 'connector' ? { startMarker: val } : null,
+                    updateSelectedElements(
+                      (el) => (el.type === 'connector' ? { startMarker: val } : null),
+                      { syncSameType: true },
                     )
                   }
                 />
@@ -877,8 +962,9 @@ export function InspectorPanel({ open, onToggle }) {
                   mixed={sharedEndMarker === '__mixed__'}
                   direction="end"
                   onChange={(val) =>
-                    updateSelectedElements((el) =>
-                      el.type === 'connector' ? { endMarker: val } : null,
+                    updateSelectedElements(
+                      (el) => (el.type === 'connector' ? { endMarker: val } : null),
+                      { syncSameType: true },
                     )
                   }
                 />
@@ -1032,8 +1118,9 @@ export function InspectorPanel({ open, onToggle }) {
                         key={font.id}
                         type="button"
                         onClick={() =>
-                          updateSelectedElements((el) =>
-                            el.type !== 'freehand' ? { fontFamily: font.id } : null,
+                          updateSelectedElements(
+                            (el) => (el.type !== 'freehand' ? { fontFamily: font.id } : null),
+                            { syncSameType: true },
                           )
                         }
                         className={`py-1.5 rounded-md border font-medium ${
@@ -1056,8 +1143,9 @@ export function InspectorPanel({ open, onToggle }) {
                         key={opt.value}
                         type="button"
                         onClick={() =>
-                          updateSelectedElements((el) =>
-                            el.type !== 'freehand' ? { fontSize: opt.value } : null,
+                          updateSelectedElements(
+                            (el) => (el.type !== 'freehand' ? { fontSize: opt.value } : null),
+                            { syncSameType: true },
                           )
                         }
                         className={`py-1.5 rounded-md border font-mono-tabular font-medium ${
@@ -1085,7 +1173,9 @@ export function InspectorPanel({ open, onToggle }) {
                     <button
                       key={sw.value}
                       type="button"
-                      onClick={() => updateSelectedElements({ strokeColor: sw.value })}
+                      onClick={() =>
+                        updateSelectedElements({ strokeColor: sw.value }, { syncSameType: true })
+                      }
                       title={sw.label}
                       aria-label={`Warna garis ${sw.label}`}
                       className={`h-6 w-6 rounded-md border ${
@@ -1110,8 +1200,9 @@ export function InspectorPanel({ open, onToggle }) {
                         key={sw.value}
                         type="button"
                         onClick={() =>
-                          updateSelectedElements((el) =>
-                            !NON_FILLABLE_TYPES.has(el.type) ? { fillColor: sw.value } : null,
+                          updateSelectedElements(
+                            (el) => (!NON_FILLABLE_TYPES.has(el.type) ? { fillColor: sw.value } : null),
+                            { syncSameType: true },
                           )
                         }
                         title={sw.label}
@@ -1141,7 +1232,9 @@ export function InspectorPanel({ open, onToggle }) {
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => updateSelectedElements({ strokeWidth: opt.value })}
+                      onClick={() =>
+                        updateSelectedElements({ strokeWidth: opt.value }, { syncSameType: true })
+                      }
                       className={`py-1.5 rounded-md border font-medium ${
                         sharedStrokeWidth === opt.value
                           ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
@@ -1167,10 +1260,12 @@ export function InspectorPanel({ open, onToggle }) {
                         key={st.id}
                         type="button"
                         onClick={() =>
-                          updateSelectedElements((el) =>
-                            el.type !== 'freehand' && el.type !== 'text'
-                              ? { strokeStyle: st.id }
-                              : null,
+                          updateSelectedElements(
+                            (el) =>
+                              el.type !== 'freehand' && el.type !== 'text'
+                                ? { strokeStyle: st.id }
+                                : null,
+                            { syncSameType: true },
                           )
                         }
                         className={`py-1.5 rounded-md border font-medium ${
@@ -1193,8 +1288,9 @@ export function InspectorPanel({ open, onToggle }) {
                     <button
                       type="button"
                       onClick={() =>
-                        updateSelectedElements((el) =>
-                          el.type !== 'freehand' ? { roughness: 0, fontFamily: 'sans' } : null,
+                        updateSelectedElements(
+                          (el) => (el.type !== 'freehand' ? { roughness: 0, fontFamily: 'sans' } : null),
+                          { syncSameType: true },
                         )
                       }
                       className={`py-1.5 rounded-md border font-medium ${
@@ -1208,8 +1304,10 @@ export function InspectorPanel({ open, onToggle }) {
                     <button
                       type="button"
                       onClick={() =>
-                        updateSelectedElements((el) =>
-                          el.type !== 'freehand' ? { roughness: 1.3, fontFamily: 'sketch' } : null,
+                        updateSelectedElements(
+                          (el) =>
+                            el.type !== 'freehand' ? { roughness: 1.3, fontFamily: 'sketch' } : null,
+                          { syncSameType: true },
                         )
                       }
                       className={`py-1.5 rounded-md border font-medium ${
@@ -1231,7 +1329,9 @@ export function InspectorPanel({ open, onToggle }) {
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => updateSelectedElements({ opacity: opt.value })}
+                      onClick={() =>
+                        updateSelectedElements({ opacity: opt.value }, { syncSameType: true })
+                      }
                       className={`py-1.5 rounded-md border font-mono-tabular font-medium ${
                         sharedOpacity === opt.value
                           ? 'border-[#1D4ED8] bg-[#DBEAFE] text-[#1D4ED8]'
@@ -1266,10 +1366,12 @@ export function InspectorPanel({ open, onToggle }) {
                         const val = Number(e.target.value);
                         if (!Number.isFinite(val)) return;
                         const deg = normalizeRotation(val);
-                        updateSelectedElements((el) =>
-                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                            ? { rotation: deg }
-                            : null,
+                        updateSelectedElements(
+                          (el) =>
+                            el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                              ? { rotation: deg }
+                              : null,
+                          { syncSameType: true },
                         );
                       }}
                       className="w-16 rounded-md border border-[#E2E8F0] px-1.5 py-0.5 text-right font-mono-tabular text-xs text-[#0F172A] focus:border-[#1D4ED8] focus:outline-none"
@@ -1286,10 +1388,12 @@ export function InspectorPanel({ open, onToggle }) {
                   value={typeof sharedRotation === 'number' ? Math.round(sharedRotation) : 0}
                   onChange={(e) => {
                     const deg = normalizeRotation(Number(e.target.value));
-                    updateSelectedElements((el) =>
-                      el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                        ? { rotation: deg }
-                        : null,
+                    updateSelectedElements(
+                      (el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: deg }
+                          : null,
+                      { syncSameType: true },
                     );
                   }}
                   className="w-full accent-[#1D4ED8] cursor-pointer"
@@ -1299,10 +1403,12 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Putar 90° berlawanan jarum jam"
                     onClick={() =>
-                      updateSelectedElements((el) =>
-                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                          ? { rotation: normalizeRotation((el.rotation || 0) - 90) }
-                          : null,
+                      updateSelectedElements(
+                        (el) =>
+                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                            ? { rotation: normalizeRotation((el.rotation || 0) - 90) }
+                            : null,
+                        { syncSameType: true },
                       )
                     }
                     className="inline-flex items-center justify-center gap-0.5 py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
@@ -1314,10 +1420,12 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Putar 45° berlawanan jarum jam"
                     onClick={() =>
-                      updateSelectedElements((el) =>
-                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                          ? { rotation: normalizeRotation((el.rotation || 0) - 45) }
-                          : null,
+                      updateSelectedElements(
+                        (el) =>
+                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                            ? { rotation: normalizeRotation((el.rotation || 0) - 45) }
+                            : null,
+                        { syncSameType: true },
                       )
                     }
                     className="py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
@@ -1328,10 +1436,12 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Reset rotasi ke 0°"
                     onClick={() =>
-                      updateSelectedElements((el) =>
-                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                          ? { rotation: 0 }
-                          : null,
+                      updateSelectedElements(
+                        (el) =>
+                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                            ? { rotation: 0 }
+                            : null,
+                        { syncSameType: true },
                       )
                     }
                     className={`py-1.5 rounded-md border font-mono-tabular font-medium ${
@@ -1346,10 +1456,12 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Putar 45° searah jarum jam"
                     onClick={() =>
-                      updateSelectedElements((el) =>
-                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                          ? { rotation: normalizeRotation((el.rotation || 0) + 45) }
-                          : null,
+                      updateSelectedElements(
+                        (el) =>
+                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                            ? { rotation: normalizeRotation((el.rotation || 0) + 45) }
+                            : null,
+                        { syncSameType: true },
                       )
                     }
                     className="py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
@@ -1360,10 +1472,12 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Putar 90° searah jarum jam"
                     onClick={() =>
-                      updateSelectedElements((el) =>
-                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                          ? { rotation: normalizeRotation((el.rotation || 0) + 90) }
-                          : null,
+                      updateSelectedElements(
+                        (el) =>
+                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                            ? { rotation: normalizeRotation((el.rotation || 0) + 90) }
+                            : null,
+                        { syncSameType: true },
                       )
                     }
                     className="inline-flex items-center justify-center gap-0.5 py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"

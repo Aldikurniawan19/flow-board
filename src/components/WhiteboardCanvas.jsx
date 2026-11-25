@@ -517,6 +517,7 @@ export function WhiteboardCanvas() {
             interactionRef.current = {
               mode: 'rotate',
               id: sel.id,
+              elementType: sel.type,
               center: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
             };
             setCursorStyle('grabbing');
@@ -528,6 +529,7 @@ export function WhiteboardCanvas() {
             interactionRef.current = {
               mode: 'resize',
               id: sel.id,
+              elementType: sel.type,
               handle,
               startWorld: world,
               initialRect: rect,
@@ -823,8 +825,15 @@ export function WhiteboardCanvas() {
           nextDeg = normalizeRotation(Math.round(nextDeg));
         }
       }
+      const syncSameType = store.settings.syncSameType !== false;
       store.setElementsLive((els) =>
-        els.map((el) => (el.id === interaction.id ? { ...el, rotation: nextDeg } : el)),
+        els.map((el) => {
+          if (el.id === interaction.id) return { ...el, rotation: nextDeg };
+          if (syncSameType && el.type === interaction.elementType && !el.locked) {
+            return { ...el, rotation: nextDeg };
+          }
+          return el;
+        }),
       );
       return;
     }
@@ -850,8 +859,16 @@ export function WhiteboardCanvas() {
               height: Math.max(28, snapValue(resized.height, GRID_SIZE, true)),
             }
           : resized;
+      const syncSameType = store.settings.syncSameType !== false;
       store.setElementsLive((els) =>
-        els.map((el) => (el.id === interaction.id ? { ...el, ...snapped } : el)),
+        els.map((el) => {
+          if (el.id === interaction.id) return { ...el, ...snapped };
+          if (syncSameType && el.type === interaction.elementType && !el.locked) {
+            const rect = getNormalizedRect(el);
+            return { ...el, x: rect.x, y: rect.y, width: snapped.width, height: snapped.height };
+          }
+          return el;
+        }),
       );
       return;
     }
@@ -1208,10 +1225,21 @@ export function WhiteboardCanvas() {
           containerHeight={canvasRef.current?.clientHeight || 600}
           currentType={contextMenu.currentType}
           selectedCount={contextMenu.selectedCount}
+          sameTypeCount={
+            elements.filter((el) => el.type === contextMenu.currentType && !el.locked).length
+          }
+          syncSameType={settings.syncSameType !== false}
+          onToggleSyncSameType={() =>
+            useBoardStore
+              .getState()
+              .updateSettings({ syncSameType: settings.syncSameType === false })
+          }
           onSelectShape={(targetType) => {
             useBoardStore
               .getState()
-              .updateSelectedElements((el) => morphElementShape(el, targetType));
+              .updateSelectedElements((el) => morphElementShape(el, targetType), {
+                syncSameType: true,
+              });
             setContextMenu(null);
           }}
           onClose={() => setContextMenu(null)}

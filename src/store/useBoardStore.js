@@ -89,6 +89,7 @@ const DEFAULT_SETTINGS = {
   gridMode: 'dots',
   snapToGrid: true,
   autoCorrectShapes: true,
+  syncSameType: true,
 };
 
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -511,20 +512,36 @@ export const useBoardStore = create((set, get) => ({
   },
 
   updateSelectedElements: (patchOrUpdater, options = {}) => {
-    const selectedSet = new Set(get().selectedIds);
+    const { selectedIds, settings } = get();
+    const selectedSet = new Set(selectedIds);
     if (selectedSet.size === 0) return;
-    set((state) => ({
-      past: options.skipHistory ? state.past : appendHistory(state.past, state.elements),
-      future: options.skipHistory ? state.future : [],
-      elements: state.elements.map((el) => {
-        if (!selectedSet.has(el.id)) return el;
-        if (typeof patchOrUpdater === 'function') {
-          const nextPatch = patchOrUpdater(el);
-          return nextPatch ? { ...el, ...nextPatch } : el;
+    const shouldSyncSameType =
+      Boolean(options.syncSameType) && settings.syncSameType !== false;
+
+    set((state) => {
+      /** @type {Set<string>} */
+      const syncedTypes = new Set();
+      if (shouldSyncSameType) {
+        for (const el of state.elements) {
+          if (selectedSet.has(el.id)) syncedTypes.add(el.type);
         }
-        return { ...el, ...patchOrUpdater };
-      }),
-    }));
+      }
+
+      return {
+        past: options.skipHistory ? state.past : appendHistory(state.past, state.elements),
+        future: options.skipHistory ? state.future : [],
+        elements: state.elements.map((el) => {
+          const isSelected = selectedSet.has(el.id);
+          const isSyncedSibling = !isSelected && syncedTypes.has(el.type) && !el.locked;
+          if (!isSelected && !isSyncedSibling) return el;
+          if (typeof patchOrUpdater === 'function') {
+            const nextPatch = patchOrUpdater(el);
+            return nextPatch ? { ...el, ...nextPatch } : el;
+          }
+          return { ...el, ...patchOrUpdater };
+        }),
+      };
+    });
     get().scheduleAutosave();
   },
 

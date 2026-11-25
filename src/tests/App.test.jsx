@@ -482,5 +482,88 @@ describe('FlowBoard UI integration', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(screen.getByText('Papan 1/2')).toBeInTheDocument();
     });
-  }, 20000);
+    // Sync same-type is ON by default: changing fill/size on one component updates same-type siblings,
+    // and toggling it OFF isolates edits to only the selected component
+    const sameTypePair = [
+      {
+        id: 'sync-p1',
+        type: 'dfd_gs_process',
+        x: 40,
+        y: 40,
+        width: 160,
+        height: 96,
+        strokeColor: '#0F172A',
+        fillColor: '#DBEAFE',
+        strokeWidth: 2,
+        strokeStyle: /** @type {const} */ ('solid'),
+        roughness: 0,
+        opacity: 1,
+        seed: 11,
+        text: 'Proses A',
+        code: '1.0',
+        fontSize: 14,
+        fontFamily: /** @type {const} */ ('sans'),
+      },
+      {
+        id: 'sync-p2',
+        type: 'dfd_gs_process',
+        x: 300,
+        y: 40,
+        width: 160,
+        height: 96,
+        strokeColor: '#0F172A',
+        fillColor: '#DBEAFE',
+        strokeWidth: 2,
+        strokeStyle: /** @type {const} */ ('solid'),
+        roughness: 0,
+        opacity: 1,
+        seed: 12,
+        text: 'Proses B',
+        code: '2.0',
+        fontSize: 14,
+        fontFamily: /** @type {const} */ ('sans'),
+      },
+      {
+        id: 'sync-e1',
+        type: 'dfd_gs_entity',
+        x: 40,
+        y: 220,
+        width: 140,
+        height: 70,
+        strokeColor: '#0F172A',
+        fillColor: '#FFFFFF',
+        strokeWidth: 2,
+        strokeStyle: /** @type {const} */ ('solid'),
+        roughness: 0,
+        opacity: 1,
+        seed: 13,
+        text: 'Pelanggan',
+        fontSize: 14,
+        fontFamily: /** @type {const} */ ('sans'),
+      },
+    ];
+    act(() => {
+      useBoardStore.setState({
+        elements: sameTypePair,
+        selectedIds: ['sync-p1'],
+      });
+    });
+
+    // Default ON: changing fill color on sync-p1 also updates sync-p2, leaving sync-e1 untouched
+    const syncSwitch = screen.getByRole('switch', { name: 'Sinkron perubahan ke komponen sejenis' });
+    expect(syncSwitch).toHaveAttribute('aria-checked', 'true');
+    await user.click(screen.getByRole('button', { name: 'Warna isi Hijau Lembut' }));
+    let syncedEls = useBoardStore.getState().elements;
+    expect(syncedEls.find((e) => e.id === 'sync-p1')?.fillColor).toBe('#DCFCE7');
+    expect(syncedEls.find((e) => e.id === 'sync-p2')?.fillColor).toBe('#DCFCE7');
+    expect(syncedEls.find((e) => e.id === 'sync-e1')?.fillColor).toBe('#FFFFFF');
+
+    // Toggle OFF: changing fill color on sync-p1 only updates sync-p1
+    await user.click(syncSwitch);
+    expect(syncSwitch).toHaveAttribute('aria-checked', 'false');
+    await user.click(screen.getByRole('button', { name: 'Warna isi Amber Lembut' }));
+    syncedEls = useBoardStore.getState().elements;
+    expect(syncedEls.find((e) => e.id === 'sync-p1')?.fillColor).toBe('#FEF3C7');
+    expect(syncedEls.find((e) => e.id === 'sync-p2')?.fillColor).toBe('#DCFCE7');
+  }, 25000);
 });

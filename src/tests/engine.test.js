@@ -218,7 +218,13 @@ describe('exporter & Zod schema validation', () => {
     const erdElements = buildErdTemplate();
     const json = serializeBoardToJson({
       title: 'ERD E-Commerce',
-      settings: { renderMode: 'clean', gridMode: 'dots', snapToGrid: true, autoCorrectShapes: true },
+      settings: {
+        renderMode: 'clean',
+        gridMode: 'dots',
+        snapToGrid: true,
+        autoCorrectShapes: true,
+        syncSameType: true,
+      },
       elements: erdElements,
     });
 

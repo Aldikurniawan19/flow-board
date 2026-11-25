@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = {
   gridMode: 'dots',
   snapToGrid: true,
   autoCorrectShapes: true,
+  syncSameType: true,
 };
 
 /**
