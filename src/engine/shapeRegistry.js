@@ -1012,6 +1012,32 @@ function roundedRectSvgPath(x, y, w, h, r) {
 }
 
 /**
+ * Truncate text with an ellipsis so it never exceeds maxWidth in pixels.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {string} text
+ * @param {number} maxWidth
+ * @returns {string}
+ */
+function truncateTextToWidth(ctx, text, maxWidth) {
+  if (!text || maxWidth <= 0) return '';
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const ellipsis = '…';
+  const ellW = ctx.measureText(ellipsis).width;
+  if (ellW >= maxWidth) return '';
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (ctx.measureText(text.slice(0, mid)).width + ellW <= maxWidth) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return lo > 0 ? `${text.slice(0, lo)}${ellipsis}` : '';
+}
+
+/**
  * Render an ERD Entity Table with PK/FK badges and column types.
  * @param {CanvasRenderingContext2D} ctx
  * @param {any} rc
@@ -1046,6 +1072,15 @@ function drawErdTable(ctx, rc, el, r, isWeak) {
 
   // Rows
   const keyColW = 46;
+  const padX = 8;
+  const colGap = 12;
+  const contentLeft = r.x + keyColW + padX;
+  const contentRight = r.x + r.width - padX;
+  const availW = Math.max(0, contentRight - contentLeft);
+  const typeFontSize = Math.max(10, bodyFontSize - 1);
+  const typeFontFamily =
+    el.fontFamily === 'sketch' ? FONT_FAMILY_MAP.sketch : FONT_FAMILY_MAP.mono;
+
   ctx.beginPath();
   ctx.moveTo(r.x + keyColW, r.y + headerH);
   ctx.lineTo(r.x + keyColW, r.y + r.height);
@@ -1075,17 +1110,51 @@ function drawErdTable(ctx, rc, el, r, isWeak) {
       ctx.fillText(field.key, r.x + keyColW / 2, cy);
     }
 
-    ctx.font = `500 ${bodyFontSize}px ${bodyFontFamily}`;
+    const nameFont = `${field.key?.includes('PK') ? 600 : 500} ${bodyFontSize}px ${bodyFontFamily}`;
+    const typeFont = `400 ${typeFontSize}px ${typeFontFamily}`;
+    const rawName = field.name || '';
+    const rawType = field.type || '';
+
+    ctx.font = nameFont;
+    const measuredNameW = ctx.measureText(rawName).width;
+    ctx.font = typeFont;
+    const measuredTypeW = rawType ? ctx.measureText(rawType).width : 0;
+
+    let maxNameW = availW;
+    let maxTypeW = 0;
+    if (rawType && availW > 0) {
+      if (measuredNameW + colGap + measuredTypeW <= availW) {
+        maxNameW = measuredNameW + 1;
+        maxTypeW = measuredTypeW + 1;
+      } else {
+        maxNameW = Math.max(
+          Math.min(measuredNameW, availW * 0.45),
+          Math.min(measuredNameW, availW - measuredTypeW - colGap),
+        );
+        maxNameW = Math.max(0, Math.min(availW, maxNameW));
+        maxTypeW = Math.max(0, availW - maxNameW - colGap);
+      }
+    }
+
+    ctx.font = nameFont;
     ctx.fillStyle = '#0F172A';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(field.name || '', r.x + keyColW + 8, cy);
+    const fittedName = truncateTextToWidth(ctx, rawName, maxNameW);
+    if (fittedName) {
+      ctx.fillText(fittedName, contentLeft, cy);
+    }
 
-    if (field.type) {
-      ctx.font = `400 ${Math.max(10, bodyFontSize - 1)}px ${el.fontFamily === 'sketch' ? FONT_FAMILY_MAP.sketch : FONT_FAMILY_MAP.mono}`;
+    if (rawType && maxTypeW > 12) {
+      const actualNameW = fittedName ? ctx.measureText(fittedName).width : 0;
+      const finalTypeMaxW = Math.max(0, availW - actualNameW - (fittedName ? colGap : 0));
+      ctx.font = typeFont;
       ctx.fillStyle = '#475569';
       ctx.textAlign = 'right';
-      ctx.fillText(field.type, r.x + r.width - 8, cy);
+      const fittedType = truncateTextToWidth(ctx, rawType, finalTypeMaxW);
+      if (fittedType) {
+        ctx.fillText(fittedType, contentRight, cy);
+      }
     }
   });
   ctx.restore();

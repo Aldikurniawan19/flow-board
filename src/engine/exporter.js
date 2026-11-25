@@ -208,21 +208,41 @@ export function exportToSvgString(elements, options = {}) {
       );
     } else if (el.type === 'erd_table' || el.type === 'erd_weak_table') {
       const headerH = 34;
+      const keyColW = 46;
       const fields = el.fields || [];
       parts.push(
         `<rect x="${r.x}" y="${r.y}" width="${r.width}" height="${r.height}" rx="6" fill="${fill === 'none' ? '#FFFFFF' : fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}" />`,
       );
-      parts.push(`<rect x="${r.x}" y="${r.y}" width="${r.width}" height="${headerH}" fill="#F1F5F9" stroke="${stroke}" stroke-width="1" />`);
+      parts.push(`<rect x="${r.x}" y="${r.y}" width="${r.width}" height="${headerH}" rx="6" fill="#F1F5F9" stroke="${stroke}" stroke-width="1" />`);
+      parts.push(
+        `<line x1="${r.x + keyColW}" y1="${r.y + headerH}" x2="${r.x + keyColW}" y2="${r.y + r.height}" stroke="#E2E8F0" stroke-width="1" />`,
+      );
       parts.push(
         `<text x="${cx}" y="${r.y + 21}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSize}" font-weight="600" fill="#0F172A">${escapeXml(el.text || 'entity')}</text>`,
       );
       fields.forEach((f, idx) => {
-        const y = r.y + headerH + idx * 24 + 16;
-        if (y > r.y + r.height) return;
-        const label = [f.key, f.name, f.type].filter(Boolean).join('  ');
+        const rowY = r.y + headerH + idx * 24;
+        if (rowY + 24 > r.y + r.height + 4) return;
+        const y = rowY + 16;
+        if (idx > 0) {
+          parts.push(
+            `<line x1="${r.x}" y1="${rowY}" x2="${r.x + r.width}" y2="${rowY}" stroke="#E2E8F0" stroke-width="1" />`,
+          );
+        }
+        if (f.key) {
+          const badgeColor = f.key.includes('PK') ? '#1D4ED8' : '#B45309';
+          parts.push(
+            `<text x="${r.x + keyColW / 2}" y="${y}" text-anchor="middle" font-family="${escapeXml(FONT_FAMILY_MAP.mono)}" font-size="10" font-weight="600" fill="${badgeColor}">${escapeXml(f.key)}</text>`,
+          );
+        }
         parts.push(
-          `<text x="${r.x + 10}" y="${y}" font-family="${fontFamily}" font-size="12" fill="#0F172A">${escapeXml(label)}</text>`,
+          `<text x="${r.x + keyColW + 8}" y="${y}" font-family="${fontFamily}" font-size="12" font-weight="${f.key?.includes('PK') ? '600' : '500'}" fill="#0F172A">${escapeXml(f.name || '')}</text>`,
         );
+        if (f.type) {
+          parts.push(
+            `<text x="${r.x + r.width - 8}" y="${y}" text-anchor="end" font-family="${escapeXml(FONT_FAMILY_MAP.mono)}" font-size="11" fill="#475569">${escapeXml(f.type)}</text>`,
+          );
+        }
       });
       if (rot) parts.push('</g>');
       continue;

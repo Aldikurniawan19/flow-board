@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ElementSchema } from '../types/schema.js';
 import { orthoSegmentHitsRect } from '../engine/autoLayout.js';
+import { rectsIntersect } from '../engine/geometry.js';
 import { getNormalizedRect, isConnectableElement } from '../engine/ports.js';
 import { computeConnectorPath } from '../engine/router.js';
 import {
@@ -399,6 +400,84 @@ P6 -right-> Pimpinan : Rekap laporan operasional
 
     for (const el of res.elements) {
       expect(ElementSchema.safeParse(el).success).toBe(true);
+    }
+  });
+
+  it('strips Creole bold markup from ERD fields and auto-sizes wide ENUM tables cleanly', () => {
+    const code = `@startuml
+!theme plain
+skinparam linetype ortho
+title ERD - Sistem Pengiriman Barang
+
+entity "PELANGGAN" as pelanggan {
+  * **id_pelanggan** : INT <<PK>>
+  --
+  * nama_lengkap : VARCHAR(100)
+}
+
+entity "PENGIRIMAN" as pengiriman {
+  * **no_resi** : VARCHAR(20) <<PK>>
+  --
+  * id_pengirim : INT <<FK>>
+  * id_penerima : INT <<FK>>
+  * id_kurir : INT <<FK>>
+  * status_pengiriman : ENUM('Pending', 'Lunas', 'Dikirim', 'Diterima')
+  * tanggal_order : DATETIME
+}
+
+entity "KURIR" as kurir {
+  * **id_kurir** : INT <<PK>>
+  --
+  * no_plat_kendaraan : VARCHAR(15)
+  * status_ketersediaan : ENUM('Tersedia', 'Bertugas', 'Off')
+}
+
+pelanggan ||--o{ pengiriman : "mengirim (id_pengirim)"
+pelanggan ||--o{ pengiriman : "menerima (id_penerima)"
+kurir ||--o{ pengiriman : "mengantar"
+@enduml`;
+
+    const res = parsePlantText(code, { kind: 'auto' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    expect(res.kind).toBe('erd');
+    const tables = res.elements.filter((e) => e.type === 'erd_table');
+    expect(tables).toHaveLength(3);
+
+    const pengiriman = tables.find((t) => t.text === 'PENGIRIMAN');
+    const kurir = tables.find((t) => t.text === 'KURIR');
+    expect(pengiriman).toBeDefined();
+    expect(kurir).toBeDefined();
+
+    // No raw Creole '**' markers in any parsed field name or type
+    for (const t of tables) {
+      for (const f of t.fields || []) {
+        expect(f.name).not.toContain('**');
+        expect(f.type).not.toContain('**');
+      }
+    }
+    expect(pengiriman?.fields?.[0]).toMatchObject({ key: 'PK', name: 'no_resi', type: 'VARCHAR(20)' });
+    expect(kurir?.fields?.[0]).toMatchObject({ key: 'PK', name: 'id_kurir', type: 'INT' });
+
+    // Wide ENUM tables expand dynamically so name & type never collide or overflow
+    expect((pengiriman?.width || 0) >= 480).toBe(true);
+    expect((kurir?.width || 0) >= 400).toBe(true);
+
+    // Zero node overlaps & zero wires cutting through tables
+    for (let i = 0; i < tables.length; i += 1) {
+      for (let j = i + 1; j < tables.length; j += 1) {
+        expect(rectsIntersect(getNormalizedRect(tables[i]), getNormalizedRect(tables[j]))).toBe(false);
+      }
+    }
+    const byId = new Map(res.elements.map((e) => [e.id, e]));
+    for (const conn of res.elements.filter((e) => e.type === 'connector')) {
+      const pts = computeConnectorPath(conn, byId).points;
+      for (let i = 1; i < pts.length - 2; i += 1) {
+        for (const t of tables) {
+          expect(orthoSegmentHitsRect(pts[i], pts[i + 1], getNormalizedRect(t))).toBe(false);
+        }
+      }
     }
   });
 });

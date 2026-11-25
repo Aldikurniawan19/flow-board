@@ -519,7 +519,12 @@ function parseErd(lines, roughness) {
         key = 'PK';
       }
       clean = clean.replace(/<<[^>]+>>|\((PK|FK|PK,\s*FK)\)/gi, '').trim();
-      const [colNameRaw, colTypeRaw] = clean.split(':').map((s) => s.trim());
+      const colonIdx = clean.indexOf(':');
+      const colNameRaw = cleanPlantLabel(
+        colonIdx >= 0 ? clean.slice(0, colonIdx).trim() : clean.trim(),
+      );
+      const colTypeRaw =
+        colonIdx >= 0 ? cleanPlantLabel(clean.slice(colonIdx + 1).trim()) : '';
       if (colNameRaw) {
         current.fields.push({
           id: crypto.randomUUID(),
@@ -535,7 +540,7 @@ function parseErd(lines, roughness) {
       /^entity\s+(?:"([^"]+)"|([A-Za-z0-9_.-]+))(?:\s+as\s+([A-Za-z0-9_]+))?(?:\s*<<([^>]+)>>)?\s*(\{)?$/i,
     );
     if (entMatch) {
-      const title = entMatch[1] || entMatch[2];
+      const title = cleanPlantLabel(entMatch[1] || entMatch[2]);
       const alias = entMatch[3] || title;
       const stereo = (entMatch[4] || '').toLowerCase();
       const entry = {
@@ -561,7 +566,7 @@ function parseErd(lines, roughness) {
       const mid = relMatch[4] || '--';
       const rightTok = relMatch[5] || '';
       const to = relMatch[6] || relMatch[7];
-      const label = stripQuotes(relMatch[8] || '');
+      const label = cleanPlantLabel(stripQuotes(relMatch[8] || ''));
 
       if (!entities.has(from)) {
         entities.set(from, {
@@ -600,14 +605,21 @@ function parseErd(lines, roughness) {
   list.forEach(([alias, ent], idx) => {
     const col = idx % cols;
     const row = Math.floor(idx / cols);
-    const height = Math.max(104, 42 + ent.fields.length * 24 + 8);
+    const titleW = 44 + ent.title.length * 9.5;
+    const maxFieldW = ent.fields.reduce((maxW, f) => {
+      const nameW = (f.name || '').length * 7.6;
+      const typeW = (f.type || '').length * 7.0;
+      return Math.max(maxW, 84 + nameW + typeW);
+    }, 0);
+    const width = Math.min(560, Math.max(240, Math.ceil(Math.max(titleW, maxFieldW) / 10) * 10));
+    const height = Math.max(104, 34 + ent.fields.length * 24 + 6);
     /** @type {import('../types/schema.js').BoardElement} */
     const el = {
       id: ent.id,
       type: ent.weak ? 'erd_weak_table' : 'erd_table',
-      x: 80 + col * 320,
+      x: 80 + col * 360,
       y: 80 + row * 240,
-      width: 236,
+      width,
       height,
       strokeColor: '#0F172A',
       fillColor: '#FFFFFF',
