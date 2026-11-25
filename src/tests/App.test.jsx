@@ -619,7 +619,8 @@ describe('FlowBoard UI integration', () => {
     expect(screen.getByRole('button', { name: 'Putar animasi demo' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Berlangganan Pro' }));
     expect(screen.getByRole('heading', { name: 'Pilih Paket FlowBoard Pro' })).toBeInTheDocument();
-    expect(screen.getByText('Rp 29.000')).toBeInTheDocument();
+    expect(screen.getByText('Rp 50.000')).toBeInTheDocument();
+    expect(screen.getByText('Rp 35.000')).toBeInTheDocument();
     expect(screen.getByText('Rp 249.000')).toBeInTheDocument();
     const waLink = screen.getByRole('link', { name: 'Hubungi Admin via WhatsApp' });
     expect(waLink.getAttribute('href')).toContain('https://wa.me/');

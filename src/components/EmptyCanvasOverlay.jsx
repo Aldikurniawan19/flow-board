@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Code2, Layers, Pencil } from 'lucide-react';
+import { Bot, Code2, Layers, Pencil } from 'lucide-react';
 import { STARTER_TEMPLATES } from '../constants/templates.js';
 import { useBoardStore } from '../store/useBoardStore.js';
 
 /**
- * @param {{ onOpenPlantText: () => void }} props
+ * @param {{ onOpenPlantText: () => void, onOpenAiIntegration: () => void }} props
  */
-export function EmptyCanvasOverlay({ onOpenPlantText }) {
+export function EmptyCanvasOverlay({ onOpenPlantText, onOpenAiIntegration }) {
   const activeBoardId = useBoardStore((s) => s.activeBoardId);
   const elementsCount = useBoardStore((s) => s.elements.length);
   const applyTemplate = useBoardStore((s) => s.applyTemplate);
@@ -19,7 +19,7 @@ export function EmptyCanvasOverlay({ onOpenPlantText }) {
 
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 z-10">
-      <div className="pointer-events-auto max-w-lg w-full rounded-xl border border-[#E2E8F0] bg-[#FFFFFF]/95 p-5 shadow-sm">
+      <div className="pointer-events-auto max-w-xl w-full rounded-xl border border-[#E2E8F0] bg-[#FFFFFF]/95 p-5 shadow-sm">
         <div className="flex items-start gap-3">
           <div className="h-9 w-9 rounded-lg bg-[#F1F5F9] text-[#1D4ED8] flex items-center justify-center shrink-0">
             <Layers className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
@@ -47,14 +47,27 @@ export function EmptyCanvasOverlay({ onOpenPlantText }) {
         </div>
 
         <div className="mt-3 pt-3 border-t border-[#E2E8F0] flex flex-wrap items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={onOpenPlantText}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3 py-1.5 text-xs font-medium text-[#0F172A] hover:bg-[#F1F5F9]"
-          >
-            <Code2 className="h-3.5 w-3.5 text-[#1D4ED8]" strokeWidth={1.75} aria-hidden="true" />
-            <span>Tempel Kode PlantText</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenPlantText}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3 py-1.5 text-xs font-medium text-[#0F172A] hover:bg-[#F1F5F9]"
+            >
+              <Code2 className="h-3.5 w-3.5 text-[#1D4ED8]" strokeWidth={1.75} aria-hidden="true" />
+              <span>Tempel Kode PlantText</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenAiIntegration}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3 py-1.5 text-xs font-medium text-[#0F172A] hover:bg-[#F1F5F9]"
+            >
+              <Bot className="h-3.5 w-3.5 text-[#1D4ED8]" strokeWidth={1.75} aria-hidden="true" />
+              <span>Integrasi AI & MCP</span>
+              <span className="rounded-full bg-[#FEE2E2] px-1.5 py-0.5 text-[10px] font-semibold text-[#B91C1C] leading-none shrink-0">
+                <span className="animate-hot-blink">Hot</span>
+              </span>
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => {

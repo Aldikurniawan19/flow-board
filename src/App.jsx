@@ -172,7 +172,10 @@ export function App() {
             <>
               <TopToolbar />
               <WhiteboardCanvas />
-              <EmptyCanvasOverlay onOpenPlantText={() => setPlantTextOpen(true)} />
+              <EmptyCanvasOverlay
+                onOpenPlantText={() => setPlantTextOpen(true)}
+                onOpenAiIntegration={() => setAiModalOpen(true)}
+              />
               <ZoomStatusBar />
             </>
           )}

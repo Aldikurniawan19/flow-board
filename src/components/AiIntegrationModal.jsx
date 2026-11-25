@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
+  ArrowDown,
   ArrowLeft,
   Bot,
   Check,
@@ -26,9 +27,10 @@ const PRO_PLANS = [
   {
     id: 'monthly',
     name: 'Pro Bulanan',
-    price: 'Rp 29.000',
+    originalPrice: 'Rp 50.000',
+    price: 'Rp 35.000',
     period: '/ bulan',
-    badge: '',
+    badge: 'Promo 30%',
     description: 'Fleksibel untuk tugas akhir, proyek kuliah, atau sprint desain cepat.',
     perks: [
       'Remote MCP Server untuk Claude, Cursor & Antigravity',
@@ -40,9 +42,10 @@ const PRO_PLANS = [
   {
     id: 'yearly',
     name: 'Pro Tahunan',
+    originalPrice: '',
     price: 'Rp 249.000',
     period: '/ tahun',
-    badge: 'Hemat 28%',
+    badge: 'Hemat 40%',
     description: 'Setara Rp 20.750/bulan — paling hemat untuk pemakaian rutin.',
     perks: [
       'Semua fitur Pro Bulanan tanpa batas generate',
@@ -122,6 +125,17 @@ export function AiIntegrationModal({ open, onClose }) {
 
   const [paywallStep, setPaywallStep] = useState(/** @type {'pitch' | 'pricing'} */ ('pitch'));
   const [selectedPlanId, setSelectedPlanId] = useState('yearly');
+  const [atPitchBottom, setAtPitchBottom] = useState(false);
+  const paywallBodyRef = useRef(/** @type {HTMLDivElement | null} */ (null));
+
+  const syncPitchScrollState = useCallback(() => {
+    const el = paywallBodyRef.current;
+    if (!el) return;
+    const reachedBottom =
+      el.scrollHeight <= el.clientHeight + 16 ||
+      el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+    setAtPitchBottom(reachedBottom);
+  }, []);
 
   const [activeTab, setActiveTab] = useState(/** @type {'mcp' | 'prompt'} */ ('mcp'));
   const [keys, setKeys] = useState(
@@ -188,8 +202,30 @@ export function AiIntegrationModal({ open, onClose }) {
       setError('');
       setKeyName('');
       setPaywallStep('pitch');
+      setAtPitchBottom(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || hasAiAccess || paywallStep !== 'pitch') return undefined;
+    const el = paywallBodyRef.current;
+    if (el) el.scrollTop = 0;
+
+    const rafId = window.requestAnimationFrame(() => {
+      syncPitchScrollState();
+    });
+    window.addEventListener('resize', syncPitchScrollState);
+    let ro = null;
+    if (el && typeof ResizeObserver === 'function') {
+      ro = new ResizeObserver(() => syncPitchScrollState());
+      ro.observe(el);
+    }
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', syncPitchScrollState);
+      if (ro) ro.disconnect();
+    };
+  }, [open, hasAiAccess, paywallStep, syncPitchScrollState]);
 
   if (!open) return null;
 
@@ -296,7 +332,11 @@ export function AiIntegrationModal({ open, onClose }) {
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+          <div
+            ref={paywallBodyRef}
+            onScroll={paywallStep === 'pitch' ? syncPitchScrollState : undefined}
+            className="flex-1 overflow-y-auto p-5 space-y-4 text-xs"
+          >
             {paywallStep === 'pitch' ? (
               <>
                 <AiMotionShowcase />
@@ -370,7 +410,12 @@ export function AiIntegrationModal({ open, onClose }) {
                           ) : null}
                         </div>
 
-                        <div className="flex items-baseline gap-1">
+                        <div className="flex items-baseline gap-1.5 flex-wrap">
+                          {plan.originalPrice ? (
+                            <span className="text-xs font-medium text-[#94A3B8] line-through font-mono-tabular">
+                              {plan.originalPrice}
+                            </span>
+                          ) : null}
                           <span className="text-lg font-bold text-[#0F172A] font-mono-tabular">
                             {plan.price}
                           </span>
@@ -407,32 +452,62 @@ export function AiIntegrationModal({ open, onClose }) {
 
           {/* Footer */}
           <div className="px-5 py-3 border-t border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3.5 py-2 text-xs font-medium text-[#475569] hover:bg-[#F1F5F9]"
-            >
-              {paywallStep === 'pitch' ? 'Nanti Saja' : 'Tutup'}
-            </button>
             {paywallStep === 'pitch' ? (
-              <button
-                type="button"
-                onClick={() => setPaywallStep('pricing')}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-4 py-2 text-xs font-medium text-white hover:bg-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
-              >
-                <Crown className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
-                <span>Berlangganan Pro</span>
-              </button>
+              atPitchBottom ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3.5 py-2 text-xs font-medium text-[#475569] hover:bg-[#F1F5F9]"
+                  >
+                    Nanti Saja
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaywallStep('pricing')}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-4 py-2 text-xs font-medium text-white hover:bg-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+                  >
+                    <Crown className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                    <span>Berlangganan Pro</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = paywallBodyRef.current;
+                    if (el && typeof el.scrollTo === 'function') {
+                      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                    } else if (el) {
+                      el.scrollTop = el.scrollHeight;
+                    }
+                    syncPitchScrollState();
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-4 py-2 text-xs font-medium text-white hover:bg-[#1E40AF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+                >
+                  <span>Berlangganan Pro</span>
+                  <ArrowDown className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                </button>
+              )
             ) : (
-              <a
-                href={waUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#15803D] px-4 py-2 text-xs font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#15803D]"
-              >
-                <MessageCircle className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
-                <span>Hubungi Admin via WhatsApp</span>
-              </a>
+              <>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-3.5 py-2 text-xs font-medium text-[#475569] hover:bg-[#F1F5F9]"
+                >
+                  Tutup
+                </button>
+                <a
+                  href={waUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#15803D] px-4 py-2 text-xs font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#15803D]"
+                >
+                  <MessageCircle className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  <span>Hubungi Admin via WhatsApp</span>
+                </a>
+              </>
             )}
           </div>
         </div>
