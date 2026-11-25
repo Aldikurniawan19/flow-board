@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { GRID_SIZE } from '../constants/tokens.js';
+import { rerouteAffectedConnectors } from '../engine/autoLayout.js';
 import { screenToWorld, snapValue, worldToScreen, zoomAtPoint } from '../engine/camera.js';
 import { renderCanvasScene } from '../engine/canvasRenderer.js';
 import {
@@ -245,19 +246,51 @@ export function WhiteboardCanvas() {
         const step = e.shiftKey ? GRID_SIZE : 2;
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-        store.updateSelectedElements(
-          (el) =>
-            el.locked
-              ? null
-              : {
-                  x: el.x + dx,
-                  y: el.y + dy,
-                  waypoints: el.waypoints
-                    ? el.waypoints.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }))
-                    : el.waypoints,
-                },
-          { skipHistory: e.repeat },
+        const selectedSet = new Set(store.selectedIds);
+        const nudgedNodeIds = new Set(
+          store.elements
+            .filter((el) => selectedSet.has(el.id) && !el.locked && isConnectableElement(el))
+            .map((el) => el.id),
         );
+        const skipConnIds = new Set(
+          store.elements
+            .filter(
+              (el) =>
+                el.type === 'connector' &&
+                !el.locked &&
+                (selectedSet.has(el.id) ||
+                  (el.startBinding &&
+                    el.endBinding &&
+                    nudgedNodeIds.has(el.startBinding.elementId) &&
+                    nudgedNodeIds.has(el.endBinding.elementId))),
+            )
+            .map((el) => el.id),
+        );
+
+        if (!e.repeat) {
+          store.commitSnapshot();
+        }
+        store.setElementsLive((els) => {
+          const shifted = els.map((el) => {
+            if (el.locked) return el;
+            const moveEl = selectedSet.has(el.id) || skipConnIds.has(el.id);
+            if (!moveEl) return el;
+            return {
+              ...el,
+              x: el.x + dx,
+              y: el.y + dy,
+              waypoints: el.waypoints
+                ? el.waypoints.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }))
+                : el.waypoints,
+              labelPos: el.labelPos ? { x: el.labelPos.x + dx, y: el.labelPos.y + dy } : el.labelPos,
+            };
+          });
+          return rerouteAffectedConnectors(shifted, nudgedNodeIds, {
+            fast: false,
+            skipConnectorIds: skipConnIds,
+          });
+        });
+        store.scheduleAutosave();
         return;
       }
 
@@ -562,17 +595,43 @@ export function WhiteboardCanvas() {
         .map((id) => elementsById.get(id))
         .filter((el) => el && !el.locked);
       if (movable.length > 0) {
+        const movedNodeIds = new Set(
+          movable.filter((el) => isConnectableElement(el)).map((el) => el.id),
+        );
+        /** @type {Set<string>} */
+        const skipConnectorIds = new Set(
+          movable.filter((el) => el.type === 'connector').map((el) => el.id),
+        );
+        // Translate internal connectors rigidly when BOTH of their bound endpoints are dragged together
+        const groupInternalConnectors = store.elements.filter(
+          (el) =>
+            el.type === 'connector' &&
+            !el.locked &&
+            !skipConnectorIds.has(el.id) &&
+            el.startBinding &&
+            el.endBinding &&
+            movedNodeIds.has(el.startBinding.elementId) &&
+            movedNodeIds.has(el.endBinding.elementId),
+        );
+        for (const conn of groupInternalConnectors) {
+          skipConnectorIds.add(conn.id);
+        }
+
+        const allMoving = [...movable, ...groupInternalConnectors];
         store.commitSnapshot();
         interactionRef.current = {
           mode: 'move',
           startWorld: world,
+          movedNodeIds,
+          skipConnectorIds,
           initialPositions: new Map(
-            movable.map((el) => [
+            allMoving.map((el) => [
               el.id,
               {
                 x: el.x,
                 y: el.y,
                 waypoints: el.waypoints ? el.waypoints.map((p) => ({ ...p })) : undefined,
+                labelPos: el.labelPos ? { ...el.labelPos } : undefined,
               },
             ]),
           ),
@@ -826,15 +885,23 @@ export function WhiteboardCanvas() {
         }
       }
       const syncSameType = store.settings.syncSameType !== false;
-      store.setElementsLive((els) =>
-        els.map((el) => {
-          if (el.id === interaction.id) return { ...el, rotation: nextDeg };
+      store.setElementsLive((els) => {
+        /** @type {Set<string>} */
+        const rotatedIds = new Set();
+        const updated = els.map((el) => {
+          if (el.id === interaction.id) {
+            rotatedIds.add(el.id);
+            return { ...el, rotation: nextDeg };
+          }
           if (syncSameType && el.type === interaction.elementType && !el.locked) {
+            rotatedIds.add(el.id);
             return { ...el, rotation: nextDeg };
           }
           return el;
-        }),
-      );
+        });
+        interaction.affectedNodeIds = rotatedIds;
+        return rerouteAffectedConnectors(updated, rotatedIds, { fast: true });
+      });
       return;
     }
 
@@ -860,16 +927,24 @@ export function WhiteboardCanvas() {
             }
           : resized;
       const syncSameType = store.settings.syncSameType !== false;
-      store.setElementsLive((els) =>
-        els.map((el) => {
-          if (el.id === interaction.id) return { ...el, ...snapped };
+      store.setElementsLive((els) => {
+        /** @type {Set<string>} */
+        const resizedIds = new Set();
+        const updated = els.map((el) => {
+          if (el.id === interaction.id) {
+            resizedIds.add(el.id);
+            return { ...el, ...snapped };
+          }
           if (syncSameType && el.type === interaction.elementType && !el.locked) {
+            resizedIds.add(el.id);
             const rect = getNormalizedRect(el);
             return { ...el, x: rect.x, y: rect.y, width: snapped.width, height: snapped.height };
           }
           return el;
-        }),
-      );
+        });
+        interaction.affectedNodeIds = resizedIds;
+        return rerouteAffectedConnectors(updated, resizedIds, { fast: true });
+      });
       return;
     }
 
@@ -884,10 +959,11 @@ export function WhiteboardCanvas() {
       }
 
       // Compute smart alignment guides for single-shape dragging
-      if (interaction.initialPositions.size === 1) {
-        const [[movedId, initPos]] = Array.from(interaction.initialPositions.entries());
+      if (interaction.movedNodeIds && interaction.movedNodeIds.size === 1) {
+        const [movedId] = Array.from(interaction.movedNodeIds);
+        const initPos = interaction.initialPositions.get(movedId);
         const movedEl = store.elements.find((el) => el.id === movedId);
-        if (movedEl && isConnectableElement(movedEl)) {
+        if (initPos && movedEl && isConnectableElement(movedEl)) {
           const candidateRect = {
             ...getNormalizedRect(movedEl),
             x: initPos.x + dx,
@@ -903,16 +979,29 @@ export function WhiteboardCanvas() {
         }
       }
 
-      store.setElementsLive((els) =>
-        els.map((el) => {
+      store.setElementsLive((els) => {
+        const moved = els.map((el) => {
           const init = interaction.initialPositions.get(el.id);
           if (!init) return el;
           const shiftedWaypoints = init.waypoints
             ? init.waypoints.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }))
             : el.waypoints;
-          return { ...el, x: init.x + dx, y: init.y + dy, waypoints: shiftedWaypoints };
-        }),
-      );
+          const shiftedLabelPos = init.labelPos
+            ? { x: init.labelPos.x + dx, y: init.labelPos.y + dy }
+            : el.labelPos;
+          return {
+            ...el,
+            x: init.x + dx,
+            y: init.y + dy,
+            waypoints: shiftedWaypoints,
+            labelPos: shiftedLabelPos,
+          };
+        });
+        return rerouteAffectedConnectors(moved, interaction.movedNodeIds, {
+          fast: true,
+          skipConnectorIds: interaction.skipConnectorIds,
+        });
+      });
       return;
     }
 
@@ -950,8 +1039,19 @@ export function WhiteboardCanvas() {
 
     if (!interaction) return;
 
-    if (interaction.mode === 'pan' || interaction.mode === 'rotate') {
+    if (interaction.mode === 'pan') {
       setCursorStyle(store.activeTool === 'hand' ? 'grab' : 'default');
+      return;
+    }
+
+    if (interaction.mode === 'rotate') {
+      setCursorStyle(store.activeTool === 'hand' ? 'grab' : 'default');
+      if (interaction.affectedNodeIds && interaction.affectedNodeIds.size > 0) {
+        store.setElementsLive((els) =>
+          rerouteAffectedConnectors(els, interaction.affectedNodeIds, { fast: false }),
+        );
+        store.scheduleAutosave();
+      }
       return;
     }
 
@@ -1078,6 +1178,18 @@ export function WhiteboardCanvas() {
       interaction.mode === 'resize' ||
       (interaction.mode === 'move' && interaction.moved)
     ) {
+      if (interaction.mode === 'move' && interaction.moved && interaction.movedNodeIds?.size > 0) {
+        store.setElementsLive((els) =>
+          rerouteAffectedConnectors(els, interaction.movedNodeIds, {
+            fast: false,
+            skipConnectorIds: interaction.skipConnectorIds,
+          }),
+        );
+      } else if (interaction.mode === 'resize' && interaction.affectedNodeIds?.size > 0) {
+        store.setElementsLive((els) =>
+          rerouteAffectedConnectors(els, interaction.affectedNodeIds, { fast: false }),
+        );
+      }
       if (interaction.mode === 'draw-connector') {
         store.setActiveTool('select');
       }

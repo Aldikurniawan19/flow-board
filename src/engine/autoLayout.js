@@ -1,4 +1,10 @@
-import { getNormalizedRect, getPortNormal, isConnectableElement, resolveBindingPoint } from './ports.js';
+import {
+  getNormalizedRect,
+  getPortNormal,
+  isConnectableElement,
+  projectPointToElementAnchor,
+  resolveBindingPoint,
+} from './ports.js';
 
 const CONTAINER_TYPES = new Set(['frame', 'uml_boundary', 'uml_fragment']);
 
@@ -1911,4 +1917,474 @@ export function layoutDiagramElements(elements, options = {}) {
   }
 
   return routeConnectorsCleanly(cloned, { direction, dirHints: options.dirHints });
+}
+
+const INTERACTIVE_ELLIPSE_TYPES = new Set([
+  'ellipse',
+  'uml_usecase',
+  'dfd_yd_process',
+  'erd_chen_attribute',
+  'erd_chen_key_attr',
+  'erd_chen_multi_attr',
+  'erd_chen_derived_attr',
+]);
+
+/**
+ * Symmetric side picker for live interactive node dragging/resizing.
+ * Always selects the pair of faces with the cleanest separation between src and dst.
+ * @param {import('../types/schema.js').BoardElement} src
+ * @param {import('../types/schema.js').BoardElement} dst
+ * @returns {{ startSide: import('../types/schema.js').PortSide, endSide: import('../types/schema.js').PortSide }}
+ */
+function pickInteractiveSides(src, dst) {
+  const rS = getNormalizedRect(src);
+  const rD = getNormalizedRect(dst);
+  const sCx = rS.x + rS.width / 2;
+  const sCy = rS.y + rS.height / 2;
+  const dCx = rD.x + rD.width / 2;
+  const dCy = rD.y + rD.height / 2;
+  const dx = dCx - sCx;
+  const dy = dCy - sCy;
+
+  const horizGap = dx >= 0 ? rD.x - (rS.x + rS.width) : rS.x - (rD.x + rD.width);
+  const vertGap = dy >= 0 ? rD.y - (rS.y + rS.height) : rS.y - (rD.y + rD.height);
+
+  if (horizGap >= vertGap) {
+    return dx >= 0
+      ? { startSide: 'right', endSide: 'left' }
+      : { startSide: 'left', endSide: 'right' };
+  }
+  return dy >= 0
+    ? { startSide: 'bottom', endSide: 'top' }
+    : { startSide: 'top', endSide: 'bottom' };
+}
+
+/**
+ * Project a normalized (rx, ry) coordinate on a cardinal side onto exact ellipse perimeter if needed.
+ * @param {import('../types/schema.js').BoardElement} node
+ * @param {import('../types/schema.js').PortSide} side
+ * @param {number} t Position along side in [0, 1]
+ * @returns {{ rx: number, ry: number }}
+ */
+function computeSideAnchorNormalized(node, side, t) {
+  let rx = side === 'left' ? 0 : side === 'right' ? 1 : t;
+  let ry = side === 'top' ? 0 : side === 'bottom' ? 1 : t;
+
+  if (INTERACTIVE_ELLIPSE_TYPES.has(node.type)) {
+    if (side === 'left' || side === 'right') {
+      const dyNorm = (ry - 0.5) * 2;
+      const dxHalf = 0.5 * Math.sqrt(Math.max(0, 1 - dyNorm * dyNorm));
+      rx = side === 'left' ? 0.5 - dxHalf : 0.5 + dxHalf;
+    } else {
+      const dxNorm = (rx - 0.5) * 2;
+      const dyHalf = 0.5 * Math.sqrt(Math.max(0, 1 - dxNorm * dxNorm));
+      ry = side === 'top' ? 0.5 - dyHalf : 0.5 + dyHalf;
+    }
+  }
+
+  return {
+    rx: Math.round(rx * 1000) / 1000,
+    ry: Math.round(ry * 1000) / 1000,
+  };
+}
+
+/**
+ * Automatically adjust connector anchor sides, port distribution, waypoints, and label positions
+ * whenever one or more bound components are moved, resized, rotated, or nudged.
+ *
+ * - Untouched connectors remain completely preserved.
+ * - Connectors whose BOTH endpoints moved together can be skipped via `skipConnectorIds`.
+ * - In `fast: true` mode (during 60fps pointer drag), updates anchor sides/ports immediately and
+ *   clears stale waypoints so `computeConnectorPath` draws crisp live orthogonal/straight/curved lines.
+ * - In `fast: false` mode (on pointerup, arrow nudge, resize commit), runs obstacle-avoiding
+ *   corridor/A* routing, parallel lane separation, and collision-free label placement.
+ *
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ * @param {Set<string>} affectedNodeIds
+ * @param {{ fast?: boolean, skipConnectorIds?: Set<string> }} [options]
+ * @returns {import('../types/schema.js').BoardElement[]}
+ */
+export function rerouteAffectedConnectors(elements, affectedNodeIds, options = {}) {
+  if (!affectedNodeIds || affectedNodeIds.size === 0) return elements;
+  const fast = Boolean(options.fast);
+  const skipConnectorIds = options.skipConnectorIds || new Set();
+
+  /** @type {Set<string>} */
+  const affectedConnectorIds = new Set();
+  for (const el of elements) {
+    if (el.type !== 'connector' || el.locked || skipConnectorIds.has(el.id)) continue;
+    const sHit = Boolean(el.startBinding && affectedNodeIds.has(el.startBinding.elementId));
+    const eHit = Boolean(el.endBinding && affectedNodeIds.has(el.endBinding.elementId));
+    if (sHit || eHit) {
+      affectedConnectorIds.add(el.id);
+    }
+  }
+
+  if (affectedConnectorIds.size === 0) return elements;
+
+  const nextElements = elements.map((el) =>
+    affectedConnectorIds.has(el.id) ? structuredClone(el) : el,
+  );
+  const nodeById = new Map(
+    nextElements.filter((e) => isConnectableElement(e)).map((e) => [e.id, e]),
+  );
+  const affectedConnectors = nextElements.filter((e) => affectedConnectorIds.has(e.id));
+
+  // Count how many connectors link each unordered node pair so parallel straight lines stay separated
+  /** @type {Map<string, number>} */
+  const pairCounts = new Map();
+  for (const el of nextElements) {
+    if (el.type !== 'connector' || !el.startBinding || !el.endBinding) continue;
+    const a = el.startBinding.elementId;
+    const b = el.endBinding.elementId;
+    const pairKey = a < b ? `${a}|${b}` : `${b}|${a}`;
+    pairCounts.set(pairKey, (pairCounts.get(pairKey) || 0) + 1);
+  }
+
+  /**
+   * @typedef {{
+   *   connector: import('../types/schema.js').BoardElement,
+   *   which: 'start' | 'end',
+   *   side: import('../types/schema.js').PortSide,
+   *   sortKey: number,
+   *   isAffected: boolean
+   * }} InteractiveSlot
+   */
+  /** @type {Map<string, InteractiveSlot[]>} */
+  const sideGroups = new Map();
+  /** @type {Set<string>} */
+  const touchedGroupKeys = new Set();
+
+  // 1. Recompute optimal sides for every affected connector
+  for (const conn of affectedConnectors) {
+    const src = conn.startBinding ? nodeById.get(conn.startBinding.elementId) : null;
+    const dst = conn.endBinding ? nodeById.get(conn.endBinding.elementId) : null;
+
+    // Single-bound connector (one endpoint bound to moved shape, other endpoint free-floating)
+    if (src && !dst && conn.startBinding) {
+      const freeEnd = { x: conn.x + conn.width, y: conn.y + conn.height };
+      const anchor = projectPointToElementAnchor(freeEnd, src, { threshold: 100000, centerSnapPx: 6 });
+      if (anchor) {
+        conn.startBinding = {
+          elementId: src.id,
+          side: anchor.side,
+          rx: anchor.rx,
+          ry: anchor.ry,
+        };
+        conn.x = anchor.point.x;
+        conn.y = anchor.point.y;
+        conn.width = freeEnd.x - anchor.point.x;
+        conn.height = freeEnd.y - anchor.point.y;
+        conn.waypoints = undefined;
+        conn.labelPos = null;
+      }
+      continue;
+    }
+
+    if (!src && dst && conn.endBinding) {
+      const freeStart = { x: conn.x, y: conn.y };
+      const anchor = projectPointToElementAnchor(freeStart, dst, { threshold: 100000, centerSnapPx: 6 });
+      if (anchor) {
+        conn.endBinding = {
+          elementId: dst.id,
+          side: anchor.side,
+          rx: anchor.rx,
+          ry: anchor.ry,
+        };
+        conn.width = anchor.point.x - freeStart.x;
+        conn.height = anchor.point.y - freeStart.y;
+        conn.waypoints = undefined;
+        conn.labelPos = null;
+      }
+      continue;
+    }
+
+    if (!src || !dst || !conn.startBinding || !conn.endBinding) continue;
+
+    const rS = getNormalizedRect(src);
+    const rD = getNormalizedRect(dst);
+    const sCenter = { x: rS.x + rS.width / 2, y: rS.y + rS.height / 2 };
+    const dCenter = { x: rD.x + rD.width / 2, y: rD.y + rD.height / 2 };
+    const pairKey = src.id < dst.id ? `${src.id}|${dst.id}` : `${dst.id}|${src.id}`;
+    const isSingleStraight =
+      conn.routing === 'straight' && (pairCounts.get(pairKey) || 1) === 1;
+
+    if (isSingleStraight) {
+      const sAnchor = projectPointToElementAnchor(dCenter, src, { threshold: 100000, centerSnapPx: 4 });
+      const eAnchor = projectPointToElementAnchor(sCenter, dst, { threshold: 100000, centerSnapPx: 4 });
+      if (sAnchor && eAnchor) {
+        conn.startBinding = {
+          elementId: src.id,
+          side: sAnchor.side,
+          rx: sAnchor.rx,
+          ry: sAnchor.ry,
+        };
+        conn.endBinding = {
+          elementId: dst.id,
+          side: eAnchor.side,
+          rx: eAnchor.rx,
+          ry: eAnchor.ry,
+        };
+        conn.x = sAnchor.point.x;
+        conn.y = sAnchor.point.y;
+        conn.width = eAnchor.point.x - sAnchor.point.x;
+        conn.height = eAnchor.point.y - sAnchor.point.y;
+        conn.waypoints = undefined;
+        conn.labelPos = null;
+        continue;
+      }
+    }
+
+    const { startSide, endSide } = pickInteractiveSides(src, dst);
+    conn.startBinding = { elementId: src.id, side: startSide, rx: 0.5, ry: 0.5 };
+    conn.endBinding = { elementId: dst.id, side: endSide, rx: 0.5, ry: 0.5 };
+
+    const sKey = `${src.id}:${startSide}`;
+    const eKey = `${dst.id}:${endSide}`;
+    touchedGroupKeys.add(sKey);
+    touchedGroupKeys.add(eKey);
+
+    if (!sideGroups.has(sKey)) sideGroups.set(sKey, []);
+    if (!sideGroups.has(eKey)) sideGroups.set(eKey, []);
+
+    sideGroups.get(sKey)?.push({
+      connector: conn,
+      which: 'start',
+      side: startSide,
+      sortKey: startSide === 'left' || startSide === 'right' ? dCenter.y : dCenter.x,
+      isAffected: true,
+    });
+    sideGroups.get(eKey)?.push({
+      connector: conn,
+      which: 'end',
+      side: endSide,
+      sortKey: endSide === 'left' || endSide === 'right' ? sCenter.y : sCenter.x,
+      isAffected: true,
+    });
+  }
+
+  // Register untouched connectors that already occupy any touched (nodeId, side)
+  // so newly moved connectors share space cleanly without stacking onto existing ports
+  for (const el of nextElements) {
+    if (el.type !== 'connector' || affectedConnectorIds.has(el.id)) continue;
+    if (el.startBinding) {
+      const sKey = `${el.startBinding.elementId}:${el.startBinding.side}`;
+      if (touchedGroupKeys.has(sKey)) {
+        const dst = el.endBinding ? nodeById.get(el.endBinding.elementId) : null;
+        const dPt = dst
+          ? { x: dst.x + dst.width / 2, y: dst.y + dst.height / 2 }
+          : { x: el.x + el.width, y: el.y + el.height };
+        sideGroups.get(sKey)?.push({
+          connector: el,
+          which: 'start',
+          side: el.startBinding.side,
+          sortKey: el.startBinding.side === 'left' || el.startBinding.side === 'right' ? dPt.y : dPt.x,
+          isAffected: false,
+        });
+      }
+    }
+    if (el.endBinding) {
+      const eKey = `${el.endBinding.elementId}:${el.endBinding.side}`;
+      if (touchedGroupKeys.has(eKey)) {
+        const src = el.startBinding ? nodeById.get(el.startBinding.elementId) : null;
+        const sPt = src
+          ? { x: src.x + src.width / 2, y: src.y + src.height / 2 }
+          : { x: el.x, y: el.y };
+        sideGroups.get(eKey)?.push({
+          connector: el,
+          which: 'end',
+          side: el.endBinding.side,
+          sortKey: el.endBinding.side === 'left' || el.endBinding.side === 'right' ? sPt.y : sPt.x,
+          isAffected: false,
+        });
+      }
+    }
+  }
+
+  // 2. Distribute port positions cleanly along every touched (nodeId, side)
+  for (const [groupKey, slots] of sideGroups.entries()) {
+    const nodeId = groupKey.slice(0, groupKey.lastIndexOf(':'));
+    const ownerNode = nodeById.get(nodeId);
+    if (!ownerNode) continue;
+
+    slots.sort((a, b) => {
+      if (Math.abs(a.sortKey - b.sortKey) > 1) return a.sortKey - b.sortKey;
+      return a.connector.id.localeCompare(b.connector.id);
+    });
+
+    const isOval = INTERACTIVE_ELLIPSE_TYPES.has(ownerNode.type);
+    const n = slots.length;
+    const margin = n === 2 ? 0.26 : isOval ? 0.18 : 0.14;
+
+    slots.forEach((slot, idx) => {
+      if (!slot.isAffected) return;
+      const t = n === 1 ? 0.5 : margin + (idx / (n - 1)) * (1 - margin * 2);
+      const { rx, ry } = computeSideAnchorNormalized(ownerNode, slot.side, t);
+      const binding = slot.which === 'start' ? slot.connector.startBinding : slot.connector.endBinding;
+      if (binding) {
+        binding.rx = rx;
+        binding.ry = ry;
+      }
+    });
+  }
+
+  // Align facing parallel pairs horizontally/vertically when nodes have different heights/widths
+  // so opposite links between two nodes stay razor-straight with zero unnecessary bends
+  for (const conn of affectedConnectors) {
+    if (!conn.startBinding || !conn.endBinding) continue;
+    const src = nodeById.get(conn.startBinding.elementId);
+    const dst = nodeById.get(conn.endBinding.elementId);
+    if (!src || !dst) continue;
+    const sSide = conn.startBinding.side;
+    const eSide = conn.endBinding.side;
+    const sCount = sideGroups.get(`${src.id}:${sSide}`)?.length || 1;
+    const eCount = sideGroups.get(`${dst.id}:${eSide}`)?.length || 1;
+
+    if (
+      ((sSide === 'right' && eSide === 'left') || (sSide === 'left' && eSide === 'right')) &&
+      sCount === eCount &&
+      sCount <= 2
+    ) {
+      const pS = resolveBindingPoint(src, conn.startBinding);
+      const pE = resolveBindingPoint(dst, conn.endBinding);
+      const rS = getNormalizedRect(src);
+      const rD = getNormalizedRect(dst);
+      const targetY = rS.height <= rD.height ? pS.y : pE.y;
+      const clampedS = Math.max(0.14, Math.min(0.86, (targetY - rS.y) / Math.max(1, rS.height)));
+      const clampedE = Math.max(0.14, Math.min(0.86, (targetY - rD.y) / Math.max(1, rD.height)));
+      if (Math.abs(rS.y + clampedS * rS.height - (rD.y + clampedE * rD.height)) < 2) {
+        const sNorm = computeSideAnchorNormalized(src, sSide, clampedS);
+        const eNorm = computeSideAnchorNormalized(dst, eSide, clampedE);
+        conn.startBinding.rx = sNorm.rx;
+        conn.startBinding.ry = sNorm.ry;
+        conn.endBinding.rx = eNorm.rx;
+        conn.endBinding.ry = eNorm.ry;
+      }
+    } else if (
+      ((sSide === 'bottom' && eSide === 'top') || (sSide === 'top' && eSide === 'bottom')) &&
+      sCount === eCount &&
+      sCount <= 2
+    ) {
+      const pS = resolveBindingPoint(src, conn.startBinding);
+      const pE = resolveBindingPoint(dst, conn.endBinding);
+      const rS = getNormalizedRect(src);
+      const rD = getNormalizedRect(dst);
+      const targetX = rS.width <= rD.width ? pS.x : pE.x;
+      const clampedS = Math.max(0.14, Math.min(0.86, (targetX - rS.x) / Math.max(1, rS.width)));
+      const clampedE = Math.max(0.14, Math.min(0.86, (targetX - rD.x) / Math.max(1, rD.width)));
+      if (Math.abs(rS.x + clampedS * rS.width - (rD.x + clampedE * rD.width)) < 2) {
+        const sNorm = computeSideAnchorNormalized(src, sSide, clampedS);
+        const eNorm = computeSideAnchorNormalized(dst, eSide, clampedE);
+        conn.startBinding.rx = sNorm.rx;
+        conn.startBinding.ry = sNorm.ry;
+        conn.endBinding.rx = eNorm.rx;
+        conn.endBinding.ry = eNorm.ry;
+      }
+    }
+  }
+
+  // 3A. Fast live preview during 60fps pointer drag: clear stale waypoints & update endpoints
+  if (fast) {
+    for (const conn of affectedConnectors) {
+      if (!conn.startBinding || !conn.endBinding) continue;
+      const src = nodeById.get(conn.startBinding.elementId);
+      const dst = nodeById.get(conn.endBinding.elementId);
+      if (!src || !dst) continue;
+      const start = resolveBindingPoint(src, conn.startBinding);
+      const end = resolveBindingPoint(dst, conn.endBinding);
+      conn.x = start.x;
+      conn.y = start.y;
+      conn.width = end.x - start.x;
+      conn.height = end.y - start.y;
+      conn.waypoints = undefined;
+      conn.labelPos = null;
+    }
+    return nextElements;
+  }
+
+  // 3B. Full obstacle-avoiding orthogonal routing + label placement on drag/resize/nudge commit
+  const obstacles = nextElements
+    .filter((e) => isConnectableElement(e) && !CONTAINER_TYPES.has(e.type))
+    .map((e) => ({ id: e.id, rect: getNormalizedRect(e) }));
+
+  // Seed usedSegments with untouched connectors so newly routed wires avoid overlapping them
+  /** @type {Array<{ a: Pt, b: Pt }>} */
+  const usedSegments = [];
+  for (const el of nextElements) {
+    if (el.type !== 'connector' || affectedConnectorIds.has(el.id)) continue;
+    const pts = [
+      { x: el.x, y: el.y },
+      ...(el.waypoints || []),
+      { x: el.x + el.width, y: el.y + el.height },
+    ];
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      usedSegments.push({ a: pts[i], b: pts[i + 1] });
+    }
+  }
+
+  const twoBoundAffected = affectedConnectors.filter((c) => c.startBinding && c.endBinding);
+  const corridorRouted = routeClearCorridorChannels(twoBoundAffected, nodeById, obstacles);
+
+  /** @type {Array<{ connector: import('../types/schema.js').BoardElement, path: Pt[] }>} */
+  const routedList = [];
+
+  for (const conn of twoBoundAffected) {
+    const src = conn.startBinding ? nodeById.get(conn.startBinding.elementId) : null;
+    const dst = conn.endBinding ? nodeById.get(conn.endBinding.elementId) : null;
+    if (!src || !dst || !conn.startBinding || !conn.endBinding) continue;
+
+    const start = resolveBindingPoint(src, conn.startBinding);
+    const end = resolveBindingPoint(dst, conn.endBinding);
+
+    if (conn.routing === 'straight' || conn.routing === 'curved') {
+      conn.x = start.x;
+      conn.y = start.y;
+      conn.width = end.x - start.x;
+      conn.height = end.y - start.y;
+      conn.waypoints = undefined;
+      conn.labelPos = null;
+      routedList.push({ connector: conn, path: [start, end] });
+      continue;
+    }
+
+    const fastPath = corridorRouted.get(conn.id);
+    const fullPath =
+      fastPath ||
+      routeObstacleAvoidingOrtho(
+        start,
+        end,
+        conn.startBinding.side,
+        conn.endBinding.side,
+        obstacles,
+        new Set([src.id, dst.id]),
+        usedSegments,
+        getNormalizedRect(src),
+        getNormalizedRect(dst),
+      );
+
+    routedList.push({ connector: conn, path: fullPath });
+    for (let i = 0; i < fullPath.length - 1; i += 1) {
+      usedSegments.push({ a: fullPath[i], b: fullPath[i + 1] });
+    }
+  }
+
+  nudgeParallelSegments(routedList, obstacles, new Set(corridorRouted.keys()));
+
+  for (const { connector, path } of routedList) {
+    if (connector.routing === 'straight' || connector.routing === 'curved') continue;
+    const clean = simplifyOrthoPath(path);
+    const first = clean[0];
+    const last = clean[clean.length - 1];
+    connector.x = first.x;
+    connector.y = first.y;
+    connector.width = last.x - first.x;
+    connector.height = last.y - first.y;
+    const interior = clean.slice(1, -1);
+    connector.waypoints = interior.length > 0 ? interior : undefined;
+    connector.labelPos = null;
+  }
+
+  placeConnectorLabelsCleanly(routedList, obstacles);
+
+  return nextElements;
 }

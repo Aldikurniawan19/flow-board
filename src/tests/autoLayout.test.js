@@ -4,6 +4,7 @@ import {
   layoutDiagramElements,
   orthoSegmentHitsRect,
   rectsOverlap,
+  rerouteAffectedConnectors,
 } from '../engine/autoLayout.js';
 import { getNormalizedRect, isConnectableElement } from '../engine/ports.js';
 import { computeConnectorPath } from '../engine/router.js';
@@ -163,5 +164,133 @@ P5 --> E3 : Laporan Keuangan & Aktivitas
     const maxY = Math.max(...allNodes.map((n) => n.y + n.height));
     const aspectRatio = (maxX - minX) / Math.max(1, maxY - minY);
     expect(aspectRatio).toBeLessThan(3.5);
+  });
+
+  it('automatically flips anchor sides and reroutes connectors cleanly when a bound component is dragged to another side', () => {
+    const pelanggan = createElementFromShape('dfd_yd_entity', 60, 80);
+    pelanggan.id = 'pelanggan';
+    pelanggan.text = 'Pelanggan';
+
+    const bank = createElementFromShape('dfd_yd_entity', 60, 380);
+    bank.id = 'bank';
+    bank.text = 'Bank / Payment Gateway';
+
+    const sistem = createElementFromShape('dfd_yd_process', 520, 140);
+    sistem.id = 'sistem';
+    sistem.width = 200;
+    sistem.height = 200;
+    sistem.text = 'SISTEM RENTAL MOBIL';
+
+    const makeConn = (id, fromId, toId, text, waypoints) => ({
+      id,
+      type: 'connector',
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 0,
+      strokeColor: '#0F172A',
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: /** @type {const} */ ('solid'),
+      roughness: 0,
+      opacity: 1,
+      seed: 1,
+      text,
+      routing: /** @type {const} */ ('elbow'),
+      startMarker: /** @type {const} */ ('none'),
+      endMarker: /** @type {const} */ ('filled_arrow'),
+      startBinding: {
+        elementId: fromId,
+        side: /** @type {import('../types/schema.js').PortSide} */ ('right'),
+        rx: 1,
+        ry: 0.5,
+      },
+      endBinding: {
+        elementId: toId,
+        side: /** @type {import('../types/schema.js').PortSide} */ ('left'),
+        rx: 0,
+        ry: 0.5,
+      },
+      waypoints,
+    });
+
+    const cUntouched = makeConn('c-pel', 'pelanggan', 'sistem', 'Data registrasi', [
+      { x: 340, y: 115 },
+      { x: 340, y: 190 },
+    ]);
+    const cBankToSys = makeConn('c-b2s', 'bank', 'sistem', 'Status pembayaran', [
+      { x: 360, y: 400 },
+      { x: 360, y: 270 },
+    ]);
+    const cSysToBank = makeConn('c-s2b', 'sistem', 'bank', 'Instruksi pembayaran', [
+      { x: 390, y: 290 },
+      { x: 390, y: 430 },
+    ]);
+    cSysToBank.startBinding = { elementId: 'sistem', side: 'left', rx: 0, ry: 0.75 };
+    cSysToBank.endBinding = { elementId: 'bank', side: 'right', rx: 1, ry: 0.75 };
+
+    // Simulate dragging Bank from the LEFT of Sistem to the RIGHT of Sistem
+    const draggedRight = [
+      pelanggan,
+      { ...bank, x: 960, y: 200 },
+      sistem,
+      cUntouched,
+      cBankToSys,
+      cSysToBank,
+    ];
+
+    // Live fast preview during drag immediately flips sides and drops stale left-side waypoints
+    const live = rerouteAffectedConnectors(draggedRight, new Set(['bank']), { fast: true });
+    const liveB2S = live.find((e) => e.id === 'c-b2s');
+    const liveS2B = live.find((e) => e.id === 'c-s2b');
+    const liveUntouched = live.find((e) => e.id === 'c-pel');
+    expect(liveB2S?.startBinding?.side).toBe('left');
+    expect(liveB2S?.endBinding?.side).toBe('right');
+    expect(liveS2B?.startBinding?.side).toBe('right');
+    expect(liveS2B?.endBinding?.side).toBe('left');
+    expect(liveB2S?.waypoints).toBeUndefined();
+    expect(liveS2B?.waypoints).toBeUndefined();
+    // Parallel ports stay cleanly separated
+    expect(liveB2S?.startBinding?.ry).not.toBe(liveS2B?.endBinding?.ry);
+    // Untouched connector keeps its exact existing waypoints
+    expect(liveUntouched?.waypoints).toEqual(cUntouched.waypoints);
+
+    // Full drop-commit reroute produces obstacle-free, non-crossing orthogonal routes
+    const committed = rerouteAffectedConnectors(draggedRight, new Set(['bank']), { fast: false });
+    const byId = new Map(committed.map((e) => [e.id, e]));
+    const movedBankRect = getNormalizedRect(/** @type {any} */ (byId.get('bank')));
+    const sistemRect = getNormalizedRect(/** @type {any} */ (byId.get('sistem')));
+
+    for (const cid of ['c-b2s', 'c-s2b']) {
+      const conn = /** @type {any} */ (byId.get(cid));
+      const pts = computeConnectorPath(conn, byId).points;
+      expect(pts.length).toBeGreaterThanOrEqual(2);
+      // Every point must stay strictly in the right corridor (x >= sistem center), never swinging back left!
+      for (const pt of pts) {
+        expect(pt.x).toBeGreaterThan(sistemRect.x + sistemRect.width * 0.5);
+      }
+      // Interior segments must never slice through Bank or Sistem
+      for (let i = 1; i < pts.length - 2; i += 1) {
+        expect(orthoSegmentHitsRect(pts[i], pts[i + 1], movedBankRect)).toBe(false);
+        expect(orthoSegmentHitsRect(pts[i], pts[i + 1], sistemRect)).toBe(false);
+      }
+    }
+
+    // Dragging Bank ABOVE Sistem automatically switches connectors to bottom/top sides
+    const draggedAbove = [
+      pelanggan,
+      { ...bank, x: 540, y: -120 },
+      sistem,
+      cUntouched,
+      cBankToSys,
+      cSysToBank,
+    ];
+    const aboveRouted = rerouteAffectedConnectors(draggedAbove, new Set(['bank']), { fast: false });
+    const aboveB2S = aboveRouted.find((e) => e.id === 'c-b2s');
+    const aboveS2B = aboveRouted.find((e) => e.id === 'c-s2b');
+    expect(aboveB2S?.startBinding?.side).toBe('bottom');
+    expect(aboveB2S?.endBinding?.side).toBe('top');
+    expect(aboveS2B?.startBinding?.side).toBe('top');
+    expect(aboveS2B?.endBinding?.side).toBe('bottom');
   });
 });
