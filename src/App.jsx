@@ -24,10 +24,16 @@ export function App() {
   const [plantTextOpen, setPlantTextOpen] = useState(false);
 
   const authStatus = useBoardStore((s) => s.authStatus);
+  const theme = useBoardStore((s) => s.theme);
   const boardLoadState = useBoardStore((s) => s.boardLoadState);
   const boardLoadError = useBoardStore((s) => s.boardLoadError);
   const bootstrapAuth = useBoardStore((s) => s.bootstrapAuth);
   const loadBoards = useBoardStore((s) => s.loadBoards);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
 
   useEffect(() => {
     bootstrapAuth();
@@ -53,6 +59,24 @@ export function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (mod || e.altKey) return;
 
+      if (e.key === 'Tab' && !exportOpen && !plantTextOpen) {
+        const store = useBoardStore.getState();
+        if (!store.editingId && store.boards.length > 1) {
+          e.preventDefault();
+          store.cycleBoard(e.shiftKey ? -1 : 1);
+        }
+        return;
+      }
+
+      if (e.key.toLowerCase() === 'n' && !e.shiftKey && !e.repeat && !exportOpen && !plantTextOpen) {
+        const store = useBoardStore.getState();
+        if (!store.editingId && store.boardLoadState !== 'loading') {
+          e.preventDefault();
+          store.createNewBoard('');
+        }
+        return;
+      }
+
       if (e.key === '[') {
         e.preventDefault();
         setLeftOpen((v) => !v);
@@ -71,7 +95,7 @@ export function App() {
 
     window.addEventListener('keydown', handleAppShortcuts);
     return () => window.removeEventListener('keydown', handleAppShortcuts);
-  }, [authStatus]);
+  }, [authStatus, exportOpen, plantTextOpen]);
 
   if (authStatus === 'loading') {
     return (

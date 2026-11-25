@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertCircle, Eye, EyeOff, Layers, Loader2, Lock, Mail, User } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Layers, Loader2, Lock, Mail, Moon, Sun, User } from 'lucide-react';
 import { useBoardStore } from '../store/useBoardStore.js';
 
 export function AuthScreen() {
@@ -14,6 +14,8 @@ export function AuthScreen() {
 
   const login = useBoardStore((s) => s.login);
   const register = useBoardStore((s) => s.register);
+  const theme = useBoardStore((s) => s.theme);
+  const toggleTheme = useBoardStore((s) => s.toggleTheme);
 
   /** @param {'login' | 'register'} nextMode */
   function switchMode(nextMode) {
@@ -50,7 +52,23 @@ export function AuthScreen() {
         : '';
 
   return (
-    <main className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center px-4 py-12">
+    <main className="relative min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center px-4 py-12">
+      <button
+        type="button"
+        onClick={(e) => toggleTheme(e)}
+        aria-label={theme === 'dark' ? 'Aktifkan tema terang' : 'Aktifkan tema gelap'}
+        aria-pressed={theme === 'dark'}
+        title={theme === 'dark' ? 'Ganti ke Tema Terang' : 'Ganti ke Tema Gelap'}
+        className="fixed top-4 right-4 inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs font-medium text-[#475569] shadow-sm hover:bg-[#F1F5F9] hover:text-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+      >
+        {theme === 'dark' ? (
+          <Sun className="h-4 w-4 text-[#FBBF24]" strokeWidth={1.75} aria-hidden="true" />
+        ) : (
+          <Moon className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+        )}
+        <span>{theme === 'dark' ? 'Tema Terang' : 'Tema Gelap'}</span>
+      </button>
+
       <div className="w-full max-w-md bg-[#FFFFFF] border border-[#E2E8F0] rounded-xl p-6 sm:p-8 shadow-sm">
         <div className="flex items-center justify-center gap-3 mb-6">
           <div className="h-10 w-10 rounded-lg bg-[#1D4ED8] text-white flex items-center justify-center shrink-0">

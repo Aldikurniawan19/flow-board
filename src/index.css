@@ -14,6 +14,21 @@
   --status-danger: #B91C1C;
 }
 
+html.dark {
+  --bg-canvas: #0B1120;
+  --bg-surface: #111827;
+  --bg-subtle: #1E293B;
+  --border-default: #273549;
+  --text-primary: #F1F5F9;
+  --text-secondary: #94A3B8;
+  --brand-primary: #3B82F6;
+  --brand-primary-hover: #2563EB;
+  --status-success: #4ADE80;
+  --status-warning: #FBBF24;
+  --status-danger: #F87171;
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -106,4 +121,257 @@ body,
     scrollbar-width: thin;
     scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
   }
+
+  html.dark * {
+    scrollbar-color: rgba(100, 116, 139, 0.5) transparent;
+  }
+}
+
+/* Dark theme scrollbar & semantic UI surface/text overrides */
+html.dark *::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.45);
+}
+
+html.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.72);
+}
+
+html.dark .bg-\[\#F8FAFC\] {
+  background-color: #0B1120;
+}
+
+html.dark .bg-\[\#FFFFFF\] {
+  background-color: #111827;
+}
+
+html.dark .bg-\[\#FFFFFF\]\/95 {
+  background-color: rgba(17, 24, 39, 0.95);
+}
+
+html.dark .bg-\[\#F1F5F9\] {
+  background-color: #1E293B;
+}
+
+html.dark .bg-\[\#E2E8F0\] {
+  background-color: #273549;
+}
+
+html.dark .bg-\[\#0F172A\]\/40 {
+  background-color: rgba(2, 6, 23, 0.72);
+}
+
+html.dark .bg-\[\#DBEAFE\] {
+  background-color: rgba(37, 99, 235, 0.24);
+}
+
+html.dark .bg-\[\#DBEAFE\]\/40 {
+  background-color: rgba(37, 99, 235, 0.2);
+}
+
+html.dark .bg-\[\#DBEAFE\]\/50 {
+  background-color: rgba(37, 99, 235, 0.24);
+}
+
+html.dark .bg-\[\#EFF6FF\] {
+  background-color: rgba(37, 99, 235, 0.16);
+}
+
+html.dark .bg-\[\#DCFCE7\] {
+  background-color: rgba(21, 128, 61, 0.22);
+}
+
+html.dark .bg-\[\#FEF3C7\] {
+  background-color: rgba(180, 83, 9, 0.24);
+}
+
+html.dark .bg-\[\#FEE2E2\] {
+  background-color: rgba(185, 28, 28, 0.22);
+}
+
+html.dark .bg-\[\#1D4ED8\] {
+  background-color: #2563EB;
+}
+
+html.dark .hover\:bg-\[\#1E40AF\]:hover {
+  background-color: #1D4ED8;
+}
+
+html.dark .hover\:bg-\[\#F1F5F9\]:hover {
+  background-color: #1E293B;
+}
+
+html.dark .hover\:bg-\[\#F8FAFC\]:hover {
+  background-color: #172033;
+}
+
+html.dark .hover\:bg-\[\#E2E8F0\]:hover {
+  background-color: #334155;
+}
+
+html.dark .hover\:bg-\[\#E2E8F0\]\/70:hover {
+  background-color: rgba(51, 65, 85, 0.75);
+}
+
+html.dark .hover\:bg-\[\#DBEAFE\]:hover {
+  background-color: rgba(37, 99, 235, 0.34);
+}
+
+html.dark .hover\:bg-\[\#DBEAFE\]\/30:hover {
+  background-color: rgba(37, 99, 235, 0.2);
+}
+
+html.dark .hover\:bg-\[\#DBEAFE\]\/40:hover {
+  background-color: rgba(37, 99, 235, 0.26);
+}
+
+html.dark .hover\:bg-\[\#FEE2E2\]:hover {
+  background-color: rgba(185, 28, 28, 0.28);
+}
+
+html.dark .focus\:bg-\[\#FFFFFF\]:focus {
+  background-color: #111827;
+}
+
+html.dark .disabled\:bg-\[\#F8FAFC\]:disabled {
+  background-color: #0F172A;
+}
+
+html.dark .text-\[\#0F172A\] {
+  color: #F1F5F9;
+}
+
+html.dark .text-\[\#475569\] {
+  color: #94A3B8;
+}
+
+html.dark .text-\[\#64748B\] {
+  color: #94A3B8;
+}
+
+html.dark .text-\[\#94A3B8\] {
+  color: #64748B;
+}
+
+html.dark .text-\[\#1D4ED8\] {
+  color: #60A5FA;
+}
+
+html.dark .text-\[\#15803D\] {
+  color: #4ADE80;
+}
+
+html.dark .text-\[\#B45309\] {
+  color: #FBBF24;
+}
+
+html.dark .text-\[\#B91C1C\] {
+  color: #F87171;
+}
+
+html.dark .hover\:text-\[\#0F172A\]:hover {
+  color: #F8FAFC;
+}
+
+html.dark .hover\:text-\[\#1E40AF\]:hover {
+  color: #93C5FD;
+}
+
+html.dark .hover\:text-\[\#B91C1C\]:hover {
+  color: #FCA5A5;
+}
+
+html.dark .disabled\:text-\[\#94A3B8\]:disabled {
+  color: #475569;
+}
+
+html.dark .placeholder\:text-\[\#94A3B8\]::placeholder {
+  color: #64748B;
+}
+
+html.dark .border-\[\#E2E8F0\] {
+  border-color: #273549;
+}
+
+html.dark .border-\[\#CBD5E1\] {
+  border-color: #334155;
+}
+
+html.dark .border-\[\#0F172A\] {
+  border-color: #E2E8F0;
+}
+
+html.dark .border-\[\#1D4ED8\] {
+  border-color: #3B82F6;
+}
+
+html.dark .border-\[\#1D4ED8\]\/30 {
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+html.dark .border-\[\#1D4ED8\]\/40 {
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+html.dark .border-\[\#15803D\]\/30 {
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+html.dark .border-\[\#B45309\]\/30 {
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+html.dark .border-\[\#B91C1C\]\/30 {
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+html.dark .hover\:border-\[\#E2E8F0\]:hover {
+  border-color: #334155;
+}
+
+html.dark .hover\:border-\[\#CBD5E1\]:hover {
+  border-color: #475569;
+}
+
+html.dark .hover\:border-\[\#1D4ED8\]:hover {
+  border-color: #3B82F6;
+}
+
+html.dark .focus\:border-\[\#1D4ED8\]:focus {
+  border-color: #3B82F6;
+}
+
+html.dark .ring-\[\#1D4ED8\] {
+  --tw-ring-color: #60A5FA;
+}
+
+html.dark .focus\:ring-\[\#1D4ED8\]\/20:focus {
+  --tw-ring-color: rgba(59, 130, 246, 0.28);
+}
+
+html.dark .focus-visible\:ring-\[\#1D4ED8\]:focus-visible {
+  --tw-ring-color: #60A5FA;
+}
+
+html.dark .accent-\[\#1D4ED8\] {
+  accent-color: #3B82F6;
+}
+
+html.dark select option {
+  background-color: #111827;
+  color: #F1F5F9;
+}
+
+/* Circular reveal theme switch via View Transitions API */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
 }

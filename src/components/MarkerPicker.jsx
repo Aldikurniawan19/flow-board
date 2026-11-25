@@ -32,14 +32,14 @@ export function MarkerPreviewSvg({ marker, direction = 'end' }) {
           <polygon points="28,4 39,9 28,14" fill="currentColor" stroke="none" />
         )}
         {marker === 'hollow_triangle' && (
-          <polygon points="27,3.5 39,9 27,14.5" fill="#FFFFFF" stroke="currentColor" />
+          <polygon points="27,3.5 39,9 27,14.5" fill="var(--bg-surface)" stroke="currentColor" />
         )}
         {marker === 'circle' && <circle cx="35" cy="9" r="3.5" fill="currentColor" stroke="none" />}
         {(marker === 'diamond' || marker === 'filled_diamond') && (
           <polygon points="39,9 33,5 27,9 33,13" fill="currentColor" stroke="none" />
         )}
         {marker === 'hollow_diamond' && (
-          <polygon points="39,9 33,5 27,9 33,13" fill="#FFFFFF" stroke="currentColor" />
+          <polygon points="39,9 33,5 27,9 33,13" fill="var(--bg-surface)" stroke="currentColor" />
         )}
         {marker === 'crow_one' && <line x1="33" y1="3.5" x2="33" y2="14.5" />}
         {marker === 'crow_one_only' && (
@@ -51,7 +51,7 @@ export function MarkerPreviewSvg({ marker, direction = 'end' }) {
         {marker === 'crow_zero_one' && (
           <>
             <line x1="35" y1="3.5" x2="35" y2="14.5" />
-            <circle cx="27.5" cy="9" r="3.5" fill="#FFFFFF" stroke="currentColor" />
+            <circle cx="27.5" cy="9" r="3.5" fill="var(--bg-surface)" stroke="currentColor" />
           </>
         )}
         {marker === 'crow_many' && (
@@ -71,7 +71,7 @@ export function MarkerPreviewSvg({ marker, direction = 'end' }) {
           <>
             <line x1="29" y1="9" x2="39" y2="3.5" />
             <line x1="29" y1="9" x2="39" y2="14.5" />
-            <circle cx="23.5" cy="9" r="3.5" fill="#FFFFFF" stroke="currentColor" />
+            <circle cx="23.5" cy="9" r="3.5" fill="var(--bg-surface)" stroke="currentColor" />
           </>
         )}
       </g>

@@ -26,6 +26,143 @@ export function getSvgPathFromStroke(stroke) {
   return d.join(' ');
 }
 
+export const DARK_CANVAS_BG = '#0B1120';
+
+const DARK_STROKE_MAP = {
+  '#0F172A': '#F1F5F9',
+  '#1E293B': '#E2E8F0',
+  '#000000': '#F1F5F9',
+  '#334155': '#CBD5E1',
+  '#475569': '#CBD5E1',
+  '#666666': '#CBD5E1',
+  '#1D4ED8': '#60A5FA',
+  '#1E40AF': '#60A5FA',
+  '#1565C0': '#60A5FA',
+  '#15803D': '#4ADE80',
+  '#2E7D32': '#4ADE80',
+  '#B45309': '#FBBF24',
+  '#B91C1C': '#F87171',
+  '#0E7490': '#22D3EE',
+};
+
+const DARK_FILL_MAP = {
+  '#FFFFFF': '#1E293B',
+  '#F8FAFC': '#172033',
+  '#F5F5F5': '#172033',
+  '#F1F5F9': '#253349',
+  '#E2E8F0': '#334155',
+  '#DBEAFE': '#1E3A5F',
+  '#DCFCE7': '#143A29',
+  '#FEF3C7': '#3F2E14',
+  '#FEE2E2': '#441C24',
+  '#CFFAFE': '#143A47',
+  '#0F172A': '#F1F5F9',
+  '#1E293B': '#E2E8F0',
+  '#000000': '#F1F5F9',
+  '#334155': '#CBD5E1',
+  '#475569': '#CBD5E1',
+  '#666666': '#CBD5E1',
+  '#1D4ED8': '#60A5FA',
+  '#15803D': '#4ADE80',
+  '#B45309': '#FBBF24',
+  '#B91C1C': '#F87171',
+  '#0E7490': '#22D3EE',
+};
+
+/**
+ * Parse `#RGB` or `#RRGGBB` color strings.
+ * @param {string} color
+ * @returns {{ r: number, g: number, b: number } | null}
+ */
+function parseHexColor(color) {
+  const m = color.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return null;
+  const hex = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+  return {
+    r: parseInt(hex.slice(0, 2), 16),
+    g: parseInt(hex.slice(2, 4), 16),
+    b: parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+/**
+ * Adapt light-mode diagram colors for dark canvas rendering without mutating stored data.
+ * @param {string} color
+ * @param {'fill' | 'stroke'} kind
+ * @returns {string}
+ */
+export function adaptColorForDarkCanvas(color, kind) {
+  const trimmed = color.trim();
+  if (!trimmed.startsWith('#')) return color;
+  const rgb = parseHexColor(trimmed);
+  if (!rgb) return color;
+
+  const upper =
+    trimmed.length === 4
+      ? `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`.toUpperCase()
+      : trimmed.toUpperCase();
+
+  if (kind === 'stroke' && DARK_STROKE_MAP[/** @type {keyof typeof DARK_STROKE_MAP} */ (upper)]) {
+    return DARK_STROKE_MAP[/** @type {keyof typeof DARK_STROKE_MAP} */ (upper)];
+  }
+  if (kind === 'fill' && DARK_FILL_MAP[/** @type {keyof typeof DARK_FILL_MAP} */ (upper)]) {
+    return DARK_FILL_MAP[/** @type {keyof typeof DARK_FILL_MAP} */ (upper)];
+  }
+
+  const lum = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+  const toHex = (/** @type {number} */ v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+
+  if (kind === 'fill' && lum >= 0.76) {
+    // Convert bright paper/pastel fills into subtle dark-mode tinted surfaces
+    const mix = (/** @type {number} */ c, /** @type {number} */ base) => base + (c - 180) * 0.25;
+    return `#${toHex(mix(rgb.r, 30))}${toHex(mix(rgb.g, 41))}${toHex(mix(rgb.b, 59))}`;
+  }
+
+  if (lum <= 0.32) {
+    const lift = (/** @type {number} */ c) => c + (241 - c) * 0.72;
+    return `#${toHex(lift(rgb.r))}${toHex(lift(rgb.g))}${toHex(lift(rgb.b))}`;
+  }
+
+  return color;
+}
+
+/**
+ * Temporarily intercept CanvasRenderingContext2D fillStyle/strokeStyle assignments for dark canvas rendering.
+ * @param {CanvasRenderingContext2D} ctx
+ * @returns {() => void}
+ */
+export function patchDarkCanvasPalette(ctx) {
+  if (typeof CanvasRenderingContext2D === 'undefined') return () => {};
+  const proto = CanvasRenderingContext2D.prototype;
+  const fillDesc = Object.getOwnPropertyDescriptor(proto, 'fillStyle');
+  const strokeDesc = Object.getOwnPropertyDescriptor(proto, 'strokeStyle');
+  if (!fillDesc?.get || !fillDesc.set || !strokeDesc?.get || !strokeDesc.set) {
+    return () => {};
+  }
+  const { get: fGet, set: fSet } = fillDesc;
+  const { get: sGet, set: sSet } = strokeDesc;
+
+  Object.defineProperty(ctx, 'fillStyle', {
+    configurable: true,
+    get: () => fGet.call(ctx),
+    set: (v) => {
+      fSet.call(ctx, typeof v === 'string' ? adaptColorForDarkCanvas(v, 'fill') : v);
+    },
+  });
+  Object.defineProperty(ctx, 'strokeStyle', {
+    configurable: true,
+    get: () => sGet.call(ctx),
+    set: (v) => {
+      sSet.call(ctx, typeof v === 'string' ? adaptColorForDarkCanvas(v, 'stroke') : v);
+    },
+  });
+
+  return () => {
+    Reflect.deleteProperty(ctx, 'fillStyle');
+    Reflect.deleteProperty(ctx, 'strokeStyle');
+  };
+}
+
 /**
  * Render background grid (dots or lines) in screen space aligned with camera.
  * @param {CanvasRenderingContext2D} ctx
@@ -33,8 +170,9 @@ export function getSvgPathFromStroke(stroke) {
  * @param {number} height
  * @param {import('./camera.js').Camera} camera
  * @param {import('../types/schema.js').GridMode} gridMode
+ * @param {boolean} [isDark]
  */
-function drawGrid(ctx, width, height, camera, gridMode) {
+function drawGrid(ctx, width, height, camera, gridMode, isDark = false) {
   if (gridMode === 'none') return;
 
   const step = GRID_SIZE * camera.zoom;
@@ -45,14 +183,14 @@ function drawGrid(ctx, width, height, camera, gridMode) {
 
   ctx.save();
   if (gridMode === 'dots') {
-    ctx.fillStyle = '#CBD5E1';
+    ctx.fillStyle = isDark ? '#334155' : '#CBD5E1';
     for (let x = startX; x < width; x += step) {
       for (let y = startY; y < height; y += step) {
         ctx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
       }
     }
   } else {
-    ctx.strokeStyle = '#E2E8F0';
+    ctx.strokeStyle = isDark ? '#1E293B' : '#E2E8F0';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = startX; x < width; x += step) {
@@ -97,8 +235,9 @@ export function drawFreehandElement(ctx, el) {
  * @param {CanvasRenderingContext2D} ctx
  * @param {import('../types/schema.js').BoardElement} el
  * @param {Map<string, import('../types/schema.js').BoardElement>} elementsById
+ * @param {boolean} [isDark]
  */
-export function drawConnectorLabel(ctx, el, elementsById) {
+export function drawConnectorLabel(ctx, el, elementsById, isDark = false) {
   if (!el.text || !el.text.trim()) return;
   const routed = computeConnectorPath(el, elementsById);
   if (routed.points.length < 2) return;
@@ -120,14 +259,14 @@ export function drawConnectorLabel(ctx, el, elementsById) {
   const bx = routed.labelPosition.x - boxW / 2;
   const by = routed.labelPosition.y - boxH / 2;
 
-  // Report-clean white knockout mask (Draw.io/Visio style, crisp text without cluttered box borders)
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
+  // Report-clean knockout mask (matches canvas background, crisp text without cluttered box borders)
+  ctx.fillStyle = isDark ? 'rgba(11, 17, 32, 0.92)' : 'rgba(255, 255, 255, 0.94)';
   ctx.beginPath();
   ctx.roundRect?.(bx, by, boxW, boxH, 3);
   if (!ctx.roundRect) ctx.rect(bx, by, boxW, boxH);
   ctx.fill();
 
-  ctx.fillStyle = '#0F172A';
+  ctx.fillStyle = isDark ? '#F1F5F9' : '#0F172A';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   lines.forEach((line, idx) => {
@@ -222,6 +361,7 @@ export function drawConnectorElement(
  *   elements: import('../types/schema.js').BoardElement[],
  *   camera: import('./camera.js').Camera,
  *   settings: import('../types/schema.js').BoardSettings,
+ *   theme?: 'light' | 'dark',
  *   selectedIds: string[],
  *   hoveredPort: { elementId: string, side: import('../types/schema.js').PortSide, point: { x: number, y: number } } | null,
  *   showPortsForId: string | null,
@@ -233,6 +373,7 @@ export function renderCanvasScene(canvas, state) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
+  const isDark = state.theme === 'dark';
   const dpr = window.devicePixelRatio || 1;
   const cssW = canvas.clientWidth;
   const cssH = canvas.clientHeight;
@@ -243,9 +384,9 @@ export function renderCanvasScene(canvas, state) {
 
   ctx.save();
   ctx.scale(dpr, dpr);
-  ctx.fillStyle = UI_TOKENS.bgCanvas;
+  ctx.fillStyle = isDark ? DARK_CANVAS_BG : UI_TOKENS.bgCanvas;
   ctx.fillRect(0, 0, cssW, cssH);
-  drawGrid(ctx, cssW, cssH, state.camera, state.settings.gridMode);
+  drawGrid(ctx, cssW, cssH, state.camera, state.settings.gridMode, isDark);
 
   // Enter world space
   ctx.translate(state.camera.x, state.camera.y);
@@ -255,38 +396,44 @@ export function renderCanvasScene(canvas, state) {
   const elementsById = new Map(state.elements.map((el) => [el.id, el]));
   const jumpPointsMap = computeConnectorJumpPointsMap(state.elements, elementsById);
 
-  // Draw non-connectors first, then connectors on top
-  for (const el of state.elements) {
-    if (el.type === 'connector') continue;
-    if (el.type === 'freehand') {
-      drawFreehandElement(ctx, el);
-    } else {
-      drawShapeElement(ctx, rc, el);
+  const restorePalette = isDark ? patchDarkCanvasPalette(ctx) : () => {};
+  try {
+    // Draw non-connectors first, then connectors on top
+    for (const el of state.elements) {
+      if (el.type === 'connector') continue;
+      if (el.type === 'freehand') {
+        drawFreehandElement(ctx, el);
+      } else {
+        drawShapeElement(ctx, rc, el);
+      }
     }
-  }
 
-  // Pass 2: Connector lines & arrowheads (with sharp line jumps at crossings)
-  for (const el of state.elements) {
-    if (el.type === 'connector') {
-      drawConnectorElement(
-        ctx,
-        el,
-        elementsById,
-        rc,
-        false,
-        jumpPointsMap.get(el.id),
-      );
+    // Pass 2: Connector lines & arrowheads (with sharp line jumps at crossings)
+    for (const el of state.elements) {
+      if (el.type === 'connector') {
+        drawConnectorElement(
+          ctx,
+          el,
+          elementsById,
+          rc,
+          false,
+          jumpPointsMap.get(el.id),
+        );
+      }
     }
+  } finally {
+    restorePalette();
   }
 
   // Pass 3: Connector labels strictly on top so wires never slice through text
   for (const el of state.elements) {
     if (el.type === 'connector') {
-      drawConnectorLabel(ctx, el, elementsById);
+      drawConnectorLabel(ctx, el, elementsById, isDark);
     }
   }
 
-  const uiAccent = UI_TOKENS.brandPrimary;
+  const uiAccent = isDark ? '#60A5FA' : UI_TOKENS.brandPrimary;
+  const handleFill = isDark ? '#0F172A' : '#FFFFFF';
 
   // Alignment guides
   if (state.guides.length > 0) {
@@ -344,21 +491,21 @@ export function renderCanvasScene(canvas, state) {
           ctx.lineTo(ch.x, ch.y + cr);
           ctx.lineTo(ch.x - cr, ch.y);
           ctx.closePath();
-          ctx.fillStyle = ch.isCustom ? UI_TOKENS.brandPrimary : '#FFFFFF';
+          ctx.fillStyle = ch.isCustom ? uiAccent : handleFill;
           ctx.fill();
-          ctx.strokeStyle = ch.isCustom ? '#FFFFFF' : UI_TOKENS.brandPrimary;
+          ctx.strokeStyle = ch.isCustom ? handleFill : uiAccent;
           ctx.lineWidth = 1.5 / state.camera.zoom;
           ctx.stroke();
         }
       }
 
       // Start & End endpoint handles
-      ctx.strokeStyle = UI_TOKENS.brandPrimary;
+      ctx.strokeStyle = uiAccent;
       ctx.lineWidth = 1.5 / state.camera.zoom;
       [start, end].forEach((pt) => {
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = handleFill;
         ctx.fill();
         ctx.stroke();
       });
@@ -384,7 +531,7 @@ export function renderCanvasScene(canvas, state) {
       if (state.selectedIds.length === 1 && !el.locked) {
         const hs = 8 / state.camera.zoom;
         for (const h of getResizeHandles(r, 0)) {
-          ctx.fillStyle = '#FFFFFF';
+          ctx.fillStyle = handleFill;
           ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
           ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
         }
@@ -398,15 +545,15 @@ export function renderCanvasScene(canvas, state) {
         ctx.beginPath();
         ctx.moveTo(knobLocal.stemStart.x, knobLocal.stemStart.y);
         ctx.lineTo(kx, ky + kr);
-        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.strokeStyle = uiAccent;
         ctx.lineWidth = 1.5 / state.camera.zoom;
         ctx.stroke();
 
         ctx.beginPath();
         ctx.arc(kx, ky, kr, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = handleFill;
         ctx.fill();
-        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.strokeStyle = uiAccent;
         ctx.lineWidth = 1.5 / state.camera.zoom;
         ctx.stroke();
 
@@ -416,7 +563,7 @@ export function renderCanvasScene(canvas, state) {
         const endAng = Math.PI * 0.92; // wraps clockwise around top -> right -> bottom -> left
         ctx.beginPath();
         ctx.arc(kx, ky, iconR, startAng, endAng, false);
-        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.strokeStyle = uiAccent;
         ctx.lineWidth = 1.5 / state.camera.zoom;
         ctx.lineCap = 'round';
         ctx.stroke();
@@ -429,7 +576,7 @@ export function renderCanvasScene(canvas, state) {
         ctx.moveTo(tipX - headLen * 0.15, tipY - headLen * 0.95);
         ctx.lineTo(tipX, tipY);
         ctx.lineTo(tipX + headLen * 1.0, tipY + headLen * 0.12);
-        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.strokeStyle = uiAccent;
         ctx.lineWidth = 1.5 / state.camera.zoom;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -451,12 +598,12 @@ export function renderCanvasScene(canvas, state) {
         const bh = fontSize + py * 2;
         const bx = knobWorld.x + 12 / state.camera.zoom;
         const by = knobWorld.y - bh / 2;
-        ctx.fillStyle = '#0F172A';
+        ctx.fillStyle = isDark ? '#E2E8F0' : '#0F172A';
         ctx.beginPath();
         ctx.roundRect?.(bx, by, bw, bh, 4 / state.camera.zoom);
         if (!ctx.roundRect) ctx.rect(bx, by, bw, bh);
         ctx.fill();
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = isDark ? '#0F172A' : '#FFFFFF';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(label, bx + bw / 2, by + bh / 2);
@@ -484,7 +631,7 @@ export function renderCanvasScene(canvas, state) {
         ctx.rotate((target.rotation * Math.PI) / 180);
         ctx.translate(-tcx, -tcy);
       }
-      ctx.strokeStyle = UI_TOKENS.brandPrimary;
+      ctx.strokeStyle = uiAccent;
       ctx.globalAlpha = 0.45;
       ctx.lineWidth = 1.5 / state.camera.zoom;
       ctx.setLineDash([4 / state.camera.zoom, 4 / state.camera.zoom]);
@@ -497,9 +644,9 @@ export function renderCanvasScene(canvas, state) {
       for (const pt of Object.values(ports)) {
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = handleFill;
         ctx.fill();
-        ctx.strokeStyle = UI_TOKENS.brandPrimary;
+        ctx.strokeStyle = uiAccent;
         ctx.lineWidth = 1.25 / state.camera.zoom;
         ctx.stroke();
       }
@@ -510,11 +657,11 @@ export function renderCanvasScene(canvas, state) {
         ctx.globalAlpha = 1;
         ctx.beginPath();
         ctx.arc(hp.x, hp.y, 7 / state.camera.zoom, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = handleFill;
         ctx.fill();
         ctx.beginPath();
         ctx.arc(hp.x, hp.y, 5 / state.camera.zoom, 0, Math.PI * 2);
-        ctx.fillStyle = UI_TOKENS.brandPrimary;
+        ctx.fillStyle = uiAccent;
         ctx.fill();
       }
 
@@ -525,8 +672,8 @@ export function renderCanvasScene(canvas, state) {
   // Marquee box
   if (state.marquee) {
     ctx.save();
-    ctx.fillStyle = 'rgba(29, 78, 216, 0.08)';
-    ctx.strokeStyle = UI_TOKENS.brandPrimary;
+    ctx.fillStyle = isDark ? 'rgba(96, 165, 250, 0.14)' : 'rgba(29, 78, 216, 0.08)';
+    ctx.strokeStyle = uiAccent;
     ctx.lineWidth = 1 / state.camera.zoom;
     ctx.fillRect(state.marquee.x, state.marquee.y, state.marquee.width, state.marquee.height);
     ctx.strokeRect(state.marquee.x, state.marquee.y, state.marquee.width, state.marquee.height);

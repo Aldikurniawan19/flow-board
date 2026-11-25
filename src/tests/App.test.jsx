@@ -7,6 +7,8 @@ import { apiClient } from '../store/apiClient.js';
 
 describe('FlowBoard UI integration', () => {
   beforeEach(() => {
+    window.localStorage.removeItem('flowboard-theme');
+    document.documentElement.classList.remove('dark');
     useBoardStore.setState({
       user: null,
       authStatus: 'loading',
@@ -24,6 +26,7 @@ describe('FlowBoard UI integration', () => {
       past: [],
       future: [],
       copiedSize: null,
+      theme: 'light',
     });
   });
 
@@ -40,6 +43,14 @@ describe('FlowBoard UI integration', () => {
 
     expect(await screen.findByRole('heading', { name: 'FlowBoard' })).toBeInTheDocument();
     expect(screen.getByText(/Aldi Kurniawan/i)).toBeInTheDocument();
+
+    // Theme toggle works on the auth screen and persists preference
+    await user.click(screen.getByRole('button', { name: 'Aktifkan tema gelap' }));
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(window.localStorage.getItem('flowboard-theme')).toBe('dark');
+    await user.click(screen.getByRole('button', { name: 'Aktifkan tema terang' }));
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(window.localStorage.getItem('flowboard-theme')).toBe('light');
 
     // Switching between Login and Register tabs works cleanly
     await user.click(screen.getByRole('tab', { name: 'Daftar Akun' }));
@@ -223,8 +234,10 @@ describe('FlowBoard UI integration', () => {
     expect(movedShape?.x).toBe(startX + 2);
     expect(movedShape?.y).toBe(startY + 20);
 
-    // Open PlantText modal, pick DFD example, and generate native DFD diagram onto canvas
-    await user.click(screen.getByRole('button', { name: /PlantText/i }));
+    // Open unified Menu (via hover/click), verify both PlantText & Export/Import items exist, and open PlantText modal
+    await user.click(screen.getByRole('button', { name: /Menu PlantText dan Ekspor Impor/i }));
+    expect(screen.getByRole('menuitem', { name: /Ekspor \/ Impor/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: /PlantText/i }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'DFD' }));
     expect(screen.getByText(/Terdeteksi:/i)).toHaveTextContent('DFD (Gane & Sarson)');
@@ -378,5 +391,96 @@ describe('FlowBoard UI integration', () => {
       );
     });
     expect(useBoardStore.getState().selectedIds).toEqual([nodeA.id]);
+
+    // Tab / Shift+Tab switches between boards when multiple boards exist
+    const getBoardSpy = vi.spyOn(apiClient, 'getBoard').mockImplementation(async (id) => ({
+      board: {
+        id,
+        title: id === 'b2' ? 'DFD Level 1' : 'Perancangan Sistem',
+        settings: { renderMode: 'clean', gridMode: 'dots', snapToGrid: true },
+        elements: [],
+      },
+    }));
+    act(() => {
+      useBoardStore.setState({
+        boards: [
+          { id: 'b1', title: 'Perancangan Sistem', createdAt: '', updatedAt: '' },
+          { id: 'b2', title: 'DFD Level 1', createdAt: '', updatedAt: '' },
+        ],
+        activeBoardId: 'b1',
+        saveStatus: 'saved',
+      });
+    });
+    expect(screen.getByText('Papan 1/2')).toBeInTheDocument();
+    const tabNext = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    act(() => {
+      window.dispatchEvent(tabNext);
+    });
+    expect(tabNext.defaultPrevented).toBe(true);
+    await waitFor(() => {
+      expect(useBoardStore.getState().activeBoardId).toBe('b2');
+      expect(useBoardStore.getState().boardTitle).toBe('DFD Level 1');
+      expect(screen.getByText('Papan 2/2')).toBeInTheDocument();
+    });
+
+    const tabPrev = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      window.dispatchEvent(tabPrev);
+    });
+    expect(tabPrev.defaultPrevented).toBe(true);
+    await waitFor(() => {
+      expect(useBoardStore.getState().activeBoardId).toBe('b1');
+      expect(useBoardStore.getState().boardTitle).toBe('Perancangan Sistem');
+      expect(screen.getByText('Papan 1/2')).toBeInTheDocument();
+    });
+    expect(getBoardSpy).toHaveBeenCalledWith('b2');
+    expect(getBoardSpy).toHaveBeenCalledWith('b1');
+
+    // Pressing 'n' creates a new board and selects it
+    const createBoardSpy = vi.spyOn(apiClient, 'createBoard').mockResolvedValue({
+      board: {
+        id: 'b3',
+        title: 'Papan Baru 3',
+        settings: { renderMode: 'clean', gridMode: 'dots', snapToGrid: true },
+        elements: [],
+        createdAt: '',
+        updatedAt: '',
+      },
+    });
+    const newBoardKey = new KeyboardEvent('keydown', { key: 'n', bubbles: true, cancelable: true });
+    act(() => {
+      window.dispatchEvent(newBoardKey);
+    });
+    expect(newBoardKey.defaultPrevented).toBe(true);
+    await waitFor(() => {
+      expect(createBoardSpy).toHaveBeenCalled();
+      expect(useBoardStore.getState().activeBoardId).toBe('b3');
+      expect(screen.getByText('Papan 1/3')).toBeInTheDocument();
+    });
+
+    // Per-board delete button opens confirmation modal; cancel keeps board, confirm deletes it
+    const deleteBoardSpy = vi.spyOn(apiClient, 'deleteBoard').mockResolvedValue({ ok: true });
+    await user.click(screen.getByRole('button', { name: /Papan 1\/3/i }));
+    await user.click(screen.getByRole('button', { name: 'Hapus papan DFD Level 1' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText(/Hapus Papan Kerja\?/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Batal' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(deleteBoardSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Papan 1\/3/i }));
+    await user.click(screen.getByRole('button', { name: 'Hapus papan DFD Level 1' }));
+    await user.click(screen.getByRole('button', { name: 'Ya, Hapus' }));
+    await waitFor(() => {
+      expect(deleteBoardSpy).toHaveBeenCalledWith('b2');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByText('Papan 1/2')).toBeInTheDocument();
+    });
   }, 20000);
 });

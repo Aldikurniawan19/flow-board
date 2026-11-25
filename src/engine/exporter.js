@@ -7,10 +7,12 @@ import { buildSvgMarker } from './markers.js';
 import { getNormalizedRect } from './ports.js';
 import { computeConnectorJumpPointsMap, computeConnectorPath } from './router.js';
 import {
+  DARK_CANVAS_BG,
   drawConnectorElement,
   drawConnectorLabel,
   drawFreehandElement,
   getSvgPathFromStroke,
+  patchDarkCanvasPalette,
 } from './canvasRenderer.js';
 import { drawShapeElement } from './shapeRegistry.js';
 
@@ -79,6 +81,7 @@ export async function exportToPngBlob(elements, options = {}) {
   }
 
   ctx.scale(scale, scale);
+  const isDarkBg = options.background === DARK_CANVAS_BG;
   if (options.background && options.background !== 'transparent') {
     ctx.fillStyle = options.background;
     ctx.fillRect(0, 0, bounds.width, bounds.height);
@@ -89,29 +92,34 @@ export async function exportToPngBlob(elements, options = {}) {
   const elementsById = new Map(elements.map((e) => [e.id, e]));
   const jumpPointsMap = computeConnectorJumpPointsMap(elements, elementsById);
 
-  for (const el of elements) {
-    if (el.type === 'connector') continue;
-    if (el.type === 'freehand') {
-      drawFreehandElement(ctx, el);
-    } else {
-      drawShapeElement(ctx, rc, el);
+  const restorePalette = isDarkBg ? patchDarkCanvasPalette(ctx) : () => {};
+  try {
+    for (const el of elements) {
+      if (el.type === 'connector') continue;
+      if (el.type === 'freehand') {
+        drawFreehandElement(ctx, el);
+      } else {
+        drawShapeElement(ctx, rc, el);
+      }
     }
+    for (const el of elements) {
+      if (el.type === 'connector') {
+        drawConnectorElement(
+          ctx,
+          el,
+          elementsById,
+          rc,
+          false,
+          jumpPointsMap.get(el.id),
+        );
+      }
+    }
+  } finally {
+    restorePalette();
   }
   for (const el of elements) {
     if (el.type === 'connector') {
-      drawConnectorElement(
-        ctx,
-        el,
-        elementsById,
-        rc,
-        false,
-        jumpPointsMap.get(el.id),
-      );
-    }
-  }
-  for (const el of elements) {
-    if (el.type === 'connector') {
-      drawConnectorLabel(ctx, el, elementsById);
+      drawConnectorLabel(ctx, el, elementsById, isDarkBg);
     }
   }
 

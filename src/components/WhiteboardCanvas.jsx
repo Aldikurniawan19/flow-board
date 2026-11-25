@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { GRID_SIZE } from '../constants/tokens.js';
 import { screenToWorld, snapValue, worldToScreen, zoomAtPoint } from '../engine/camera.js';
 import { renderCanvasScene } from '../engine/canvasRenderer.js';
@@ -65,24 +65,26 @@ export function WhiteboardCanvas() {
   const elements = useBoardStore((s) => s.elements);
   const camera = useBoardStore((s) => s.camera);
   const settings = useBoardStore((s) => s.settings);
+  const theme = useBoardStore((s) => s.theme);
   const selectedIds = useBoardStore((s) => s.selectedIds);
   const editingId = useBoardStore((s) => s.editingId);
 
-  // Render canvas whenever state changes
-  useEffect(() => {
+  // Render canvas synchronously on commit so theme View Transitions capture the updated canvas immediately
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     renderCanvasScene(canvas, {
       elements,
       camera,
       settings,
+      theme,
       selectedIds,
       hoveredPort,
       showPortsForId,
       guides,
       marquee,
     });
-  }, [elements, camera, settings, selectedIds, hoveredPort, showPortsForId, guides, marquee]);
+  }, [elements, camera, settings, theme, selectedIds, hoveredPort, showPortsForId, guides, marquee]);
 
   // Resize observer so canvas adapts cleanly when sidebars toggle or window resizes
   useEffect(() => {
@@ -94,6 +96,7 @@ export function WhiteboardCanvas() {
         elements: s.elements,
         camera: s.camera,
         settings: s.settings,
+        theme: s.theme,
         selectedIds: s.selectedIds,
         hoveredPort: null,
         showPortsForId: null,

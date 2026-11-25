@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom';
 import { create } from 'zustand';
 import { clampZoom } from '../engine/camera.js';
 import { computeSceneBounds } from '../engine/exporter.js';
@@ -24,6 +25,63 @@ function computeFitCamera(elements) {
 }
 
 const MAX_HISTORY = 60;
+const THEME_STORAGE_KEY = 'flowboard-theme';
+
+/**
+ * Read persisted UI theme safely from localStorage.
+ * @returns {'light' | 'dark'}
+ */
+function loadInitialTheme() {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
+/**
+ * Resolve the exact center of the clicked theme button (falling back to pointer coordinates or viewport center).
+ * @param {{ clientX?: number, clientY?: number, currentTarget?: EventTarget | null, target?: EventTarget | null } | null} [source]
+ * @returns {{ x: number, y: number }}
+ */
+function resolveThemeOrigin(source) {
+  if (typeof window === 'undefined') return { x: 0, y: 0 };
+  const el = /** @type {Element | null} */ (source?.currentTarget || source?.target || null);
+  if (el && typeof el.getBoundingClientRect === 'function') {
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 || rect.height > 0) {
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      };
+    }
+  }
+  if (source && typeof source.clientX === 'number' && typeof source.clientY === 'number') {
+    if (source.clientX !== 0 || source.clientY !== 0) {
+      return { x: source.clientX, y: source.clientY };
+    }
+  }
+  return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+}
+
+/**
+ * Persist UI theme and synchronize root dark class.
+ * @param {'light' | 'dark'} theme
+ */
+function applyDocumentTheme(theme) {
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    document.documentElement.style.colorScheme = theme;
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // Ignore storage quota / privacy mode errors
+    }
+  }
+}
 
 /** @type {import('../types/schema.js').BoardSettings} */
 const DEFAULT_SETTINGS = {
@@ -87,12 +145,82 @@ export const useBoardStore = create((set, get) => ({
   /** @type {{ width: number, height: number } | null} */
   copiedSize: null,
 
+  // UI Theme
+  /** @type {'light' | 'dark'} */
+  theme: loadInitialTheme(),
+
   // Drawing defaults for new connectors / pens
   defaultStrokeColor: '#0F172A',
   defaultFillColor: '#FFFFFF',
   defaultRouting: /** @type {import('../types/schema.js').RoutingMode} */ ('elbow'),
   defaultEndMarker: /** @type {import('../types/schema.js').MarkerType} */ ('filled_arrow'),
 
+  setTheme: (theme) => {
+    const next = theme === 'dark' ? 'dark' : 'light';
+    applyDocumentTheme(next);
+    set({ theme: next });
+  },
+  /**
+   * Toggle light/dark theme with a circular reveal expanding from the clicked coordinates.
+   * @param {{ clientX?: number, clientY?: number, currentTarget?: EventTarget | null, target?: EventTarget | null }} [sourceEvent]
+   */
+  toggleTheme: (sourceEvent) => {
+    const next = get().theme === 'dark' ? 'light' : 'dark';
+    const commitTheme = () => {
+      applyDocumentTheme(next);
+      set({ theme: next });
+    };
+
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      commitTheme();
+      return;
+    }
+
+    const docWithTransition =
+      /** @type {Document & { startViewTransition?: (cb: () => void) => { ready: Promise<void> } }} */ (
+        document
+      );
+    const reducedMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (typeof docWithTransition.startViewTransition !== 'function' || reducedMotion) {
+      commitTheme();
+      return;
+    }
+
+    const { x, y } = resolveThemeOrigin(sourceEvent);
+    const maxRadius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y),
+    );
+
+    const transition = docWithTransition.startViewTransition(() => {
+      flushSync(() => {
+        commitTheme();
+      });
+    });
+
+    transition.ready
+      .then(() => {
+        document.documentElement.animate(
+          {
+            clipPath: [
+              `circle(0px at ${x}px ${y}px)`,
+              `circle(${maxRadius}px at ${x}px ${y}px)`,
+            ],
+          },
+          {
+            duration: 850,
+            easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+            pseudoElement: '::view-transition-new(root)',
+          },
+        );
+      })
+      .catch(() => {
+        // Ignore aborted view transitions if user toggles rapidly
+      });
+  },
   setFeedback: (feedback) => set({ feedback }),
   clearFeedback: () => set({ feedback: null }),
   setActiveTool: (tool) => set({ activeTool: tool, editingId: null }),
@@ -223,8 +351,30 @@ export const useBoardStore = create((set, get) => ({
     }
   },
 
+  /**
+   * Switch to the next (+1) or previous (-1) board in the workspace list.
+   * @param {1 | -1} [direction]
+   */
+  cycleBoard: async (direction = 1) => {
+    const { boards, activeBoardId, boardLoadState, saveStatus } = get();
+    if (boards.length <= 1 || boardLoadState === 'loading') return;
+    const currentIdx = boards.findIndex((b) => b.id === activeBoardId);
+    const step = direction < 0 ? -1 : 1;
+    const nextIdx = currentIdx < 0 ? 0 : (currentIdx + step + boards.length) % boards.length;
+    const nextBoard = boards[nextIdx];
+    if (!nextBoard || nextBoard.id === activeBoardId) return;
+    if (saveStatus === 'dirty') {
+      await get().saveActiveBoard();
+    }
+    await get().selectBoard(nextBoard.id);
+  },
+
   createNewBoard: async (title) => {
-    const cleanTitle = (title || '').trim() || `Papan Baru ${get().boards.length + 1}`;
+    const { saveStatus, boards } = get();
+    if (saveStatus === 'dirty') {
+      await get().saveActiveBoard();
+    }
+    const cleanTitle = (title || '').trim() || `Papan Baru ${boards.length + 1}`;
     try {
       const { board } = await apiClient.createBoard({
         title: cleanTitle,
@@ -260,9 +410,9 @@ export const useBoardStore = create((set, get) => ({
     }
   },
 
-  deleteActiveBoard: async () => {
+  deleteBoardById: async (boardId) => {
     const { activeBoardId, boards } = get();
-    if (!activeBoardId) return;
+    if (!boardId) return;
     if (boards.length <= 1) {
       set({
         feedback: {
@@ -273,19 +423,29 @@ export const useBoardStore = create((set, get) => ({
       return;
     }
 
+    const target = boards.find((b) => b.id === boardId);
     try {
-      await apiClient.deleteBoard(activeBoardId);
-      const remaining = boards.filter((b) => b.id !== activeBoardId);
+      await apiClient.deleteBoard(boardId);
+      const remaining = boards.filter((b) => b.id !== boardId);
       set({
         boards: remaining,
-        feedback: { type: 'success', message: 'Papan kerja berhasil dihapus.' },
+        feedback: {
+          type: 'success',
+          message: target ? `Papan "${target.title}" berhasil dihapus.` : 'Papan kerja berhasil dihapus.',
+        },
       });
-      await get().selectBoard(remaining[0].id);
+      if (boardId === activeBoardId && remaining.length > 0) {
+        await get().selectBoard(remaining[0].id);
+      }
     } catch (err) {
       set({
         feedback: { type: 'error', message: err?.message || 'Gagal menghapus papan kerja.' },
       });
     }
+  },
+
+  deleteActiveBoard: async () => {
+    await get().deleteBoardById(get().activeBoardId);
   },
 
   renameBoard: (title) => {
@@ -566,16 +726,22 @@ export const useBoardStore = create((set, get) => ({
   },
 
   applyTemplate: (templateElements, title) => {
-    set((state) => ({
-      past: appendHistory(state.past, state.elements),
-      future: [],
-      elements: templateElements,
-      boardTitle: title || state.boardTitle,
-      selectedIds: [],
-      editingId: null,
-      camera: { x: 0, y: 0, zoom: 1 },
-      feedback: { type: 'success', message: `Template "${title}" diterapkan ke papan kerja.` },
-    }));
+    set((state) => {
+      const nextTitle = title || state.boardTitle;
+      return {
+        past: appendHistory(state.past, state.elements),
+        future: [],
+        elements: templateElements,
+        boardTitle: nextTitle,
+        boards: state.boards.map((b) =>
+          b.id === state.activeBoardId ? { ...b, title: nextTitle } : b,
+        ),
+        selectedIds: [],
+        editingId: null,
+        camera: { x: 0, y: 0, zoom: 1 },
+        feedback: { type: 'success', message: `Template "${title}" diterapkan ke papan kerja.` },
+      };
+    });
     get().scheduleAutosave();
   },
 
@@ -584,6 +750,9 @@ export const useBoardStore = create((set, get) => ({
       past: appendHistory(state.past, state.elements),
       future: [],
       boardTitle: doc.title,
+      boards: state.boards.map((b) =>
+        b.id === state.activeBoardId ? { ...b, title: doc.title } : b,
+      ),
       settings: doc.settings,
       elements: doc.elements,
       selectedIds: [],

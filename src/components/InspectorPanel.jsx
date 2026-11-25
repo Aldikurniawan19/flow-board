@@ -133,7 +133,7 @@ export function InspectorPanel({ open, onToggle }) {
         onClick={onToggle}
         title="Buka Pengaturan Papan (])"
         aria-label="Buka panel properti elemen (])"
-        className="fixed right-3 top-16 z-20 inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-2 text-xs font-medium text-[#0F172A] shadow-sm hover:bg-[#F1F5F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+        className="fixed right-3 top-14 z-20 inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-2 text-xs font-medium text-[#0F172A] shadow-sm hover:bg-[#F1F5F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
       >
         <span aria-hidden="true" className="text-[10px] font-mono-tabular text-[#475569]">
           ]
@@ -270,7 +270,7 @@ export function InspectorPanel({ open, onToggle }) {
   return (
     <aside
       aria-label="Panel properti elemen"
-      className="w-72 shrink-0 bg-[#FFFFFF] border-l border-[#E2E8F0] flex flex-col h-full z-20 max-lg:fixed max-lg:right-0 max-lg:top-14 max-lg:bottom-0 max-lg:shadow-sm"
+      className="w-72 shrink-0 bg-[#FFFFFF] border-l border-[#E2E8F0] flex flex-col h-full z-20 max-lg:fixed max-lg:right-0 max-lg:top-12 max-lg:bottom-0 max-lg:shadow-sm"
     >
       <div className="px-3 py-2.5 border-b border-[#E2E8F0] flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-[#475569]">

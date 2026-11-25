@@ -158,6 +158,14 @@ export function ZoomStatusBar() {
                 <dd className="font-mono-tabular text-[#0F172A]">[ / ] / \</dd>
               </div>
               <div className="flex justify-between">
+                <dt>Pindah Papan</dt>
+                <dd className="font-mono-tabular text-[#0F172A]">Tab / Shift+Tab</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt>Papan Baru</dt>
+                <dd className="font-mono-tabular text-[#0F172A]">N</dd>
+              </div>
+              <div className="flex justify-between">
                 <dt>Geser Elemen</dt>
                 <dd className="font-mono-tabular text-[#0F172A]">Panah / Shift+Panah</dd>
               </div>

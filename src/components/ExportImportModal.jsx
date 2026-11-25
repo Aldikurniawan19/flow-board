@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { AlertCircle, FileCode2, FileJson, Image, Loader2, Upload, X } from 'lucide-react';
 import { MAX_IMPORT_FILE_BYTES } from '../types/schema.js';
+import { DARK_CANVAS_BG } from '../engine/canvasRenderer.js';
 import {
   exportToPngBlob,
   exportToSvgString,
@@ -31,11 +32,13 @@ function triggerDownload(blob, filename) {
 export function ExportImportModal({ open, onClose }) {
   const fileInputRef = useRef(/** @type {HTMLInputElement | null} */ (null));
   const [transparentBg, setTransparentBg] = useState(false);
+  const [darkExportBg, setDarkExportBg] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const boardTitle = useBoardStore((s) => s.boardTitle);
   const settings = useBoardStore((s) => s.settings);
+  const theme = useBoardStore((s) => s.theme);
   const elements = useBoardStore((s) => s.elements);
   const importDocument = useBoardStore((s) => s.importDocument);
   const setFeedback = useBoardStore((s) => s.setFeedback);
@@ -52,8 +55,9 @@ export function ExportImportModal({ open, onClose }) {
     setError('');
     setBusy(true);
     try {
+      const solidBg = theme === 'dark' && darkExportBg ? DARK_CANVAS_BG : '#FFFFFF';
       const blob = await exportToPngBlob(elements, {
-        background: transparentBg ? 'transparent' : '#FFFFFF',
+        background: transparentBg ? 'transparent' : solidBg,
         scale: 2,
       });
       triggerDownload(blob, `${safeSlug}.png`);
@@ -167,6 +171,18 @@ export function ExportImportModal({ open, onClose }) {
               />
               <span>Latar belakang transparan (untuk PNG & SVG)</span>
             </label>
+
+            {theme === 'dark' && !transparentBg && (
+              <label className="flex items-center gap-2 text-xs text-[#0F172A] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={darkExportBg}
+                  onChange={(e) => setDarkExportBg(e.target.checked)}
+                  className="h-4 w-4 accent-[#1D4ED8]"
+                />
+                <span>Gunakan latar tema gelap pada PNG</span>
+              </label>
+            )}
 
             <div className="grid grid-cols-3 gap-2">
               <button
