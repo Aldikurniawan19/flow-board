@@ -660,44 +660,46 @@ export function InspectorPanel({ open, onToggle }) {
                 </div>
 
                 {/* Copy & Paste Size (works across separate components without duplicating) */}
-                <div className="flex items-center gap-1.5">
-                  {resizableElements.length === 1 && referenceRect && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCopiedSize({ width: referenceWidth, height: referenceHeight });
-                        setFeedback({
-                          type: 'info',
-                          message: `Ukuran ${referenceWidth} × ${referenceHeight} px disalin.`,
-                        });
-                      }}
-                      title={`Salin ukuran ${referenceWidth} × ${referenceHeight} px untuk diterapkan ke komponen lain`}
-                      className="flex-1 inline-flex items-center justify-center gap-1 rounded-md border border-[#E2E8F0] py-1.5 px-2 text-[11px] font-medium text-[#0F172A] hover:bg-[#F1F5F9]"
-                    >
-                      <Copy className="h-3 w-3 text-[#475569]" strokeWidth={1.75} aria-hidden="true" />
-                      <span>Salin Ukuran</span>
-                    </button>
-                  )}
-                  {copiedSize && (
-                    <button
-                      type="button"
-                      disabled={allResizableLocked}
-                      onClick={() =>
-                        applyManualDimensions({
-                          width: copiedSize.width,
-                          height: copiedSize.height,
-                        })
-                      }
-                      title={`Terapkan ukuran tersalin (${copiedSize.width} × ${copiedSize.height} px)`}
-                      className="flex-1 inline-flex items-center justify-center gap-1 rounded-md border border-[#1D4ED8]/40 bg-[#EFF6FF] py-1.5 px-2 text-[11px] font-medium text-[#1D4ED8] hover:bg-[#DBEAFE] disabled:opacity-40"
-                    >
-                      <ClipboardPaste className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-                      <span className="font-mono-tabular">
-                        Tempel ({copiedSize.width}×{copiedSize.height})
-                      </span>
-                    </button>
-                  )}
-                </div>
+                {(resizableElements.length === 1 && referenceRect) || copiedSize ? (
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {resizableElements.length === 1 && referenceRect && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCopiedSize({ width: referenceWidth, height: referenceHeight });
+                          setFeedback({
+                            type: 'info',
+                            message: `Ukuran ${referenceWidth} × ${referenceHeight} px disalin.`,
+                          });
+                        }}
+                        title={`Salin ukuran ${referenceWidth} × ${referenceHeight} px untuk diterapkan ke komponen lain`}
+                        className="h-8 w-full min-w-0 inline-flex items-center justify-center gap-1 rounded-md border border-[#E2E8F0] px-2 text-[11px] font-medium text-[#0F172A] hover:bg-[#F1F5F9] whitespace-nowrap"
+                      >
+                        <Copy className="h-3 w-3 shrink-0 text-[#475569]" strokeWidth={1.75} aria-hidden="true" />
+                        <span className="truncate">Salin Ukuran</span>
+                      </button>
+                    )}
+                    {copiedSize && (
+                      <button
+                        type="button"
+                        disabled={allResizableLocked}
+                        onClick={() =>
+                          applyManualDimensions({
+                            width: copiedSize.width,
+                            height: copiedSize.height,
+                          })
+                        }
+                        title={`Terapkan ukuran tersalin (${copiedSize.width} × ${copiedSize.height} px)`}
+                        className="h-8 w-full min-w-0 inline-flex items-center justify-center gap-1 rounded-md border border-[#1D4ED8]/40 bg-[#EFF6FF] px-2 text-[11px] font-medium text-[#1D4ED8] hover:bg-[#DBEAFE] disabled:opacity-40 whitespace-nowrap"
+                      >
+                        <ClipboardPaste className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                        <span className="font-mono-tabular truncate">
+                          Tempel ({copiedSize.width}×{copiedSize.height})
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                ) : null}
 
                 {/* Multi-select one-click size equalization */}
                 {resizableElements.length > 1 && referenceRect && (
