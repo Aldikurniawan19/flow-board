@@ -1,6 +1,42 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertCircle, Eye, EyeOff, Layers, Loader2, Lock, Mail, Moon, Sun, User } from 'lucide-react';
 import { useBoardStore } from '../store/useBoardStore.js';
+
+const AUTH_ERROR_MESSAGES = {
+  google_not_configured:
+    'Login Google belum diaktifkan di server. Admin perlu mengatur GOOGLE_CLIENT_ID dan GOOGLE_CLIENT_SECRET.',
+  google_cancelled: 'Proses masuk dengan Google dibatalkan.',
+  google_invalid_state: 'Sesi otorisasi Google tidak valid atau telah kedaluwarsa. Silakan coba lagi.',
+  google_exchange_failed: 'Gagal menukar kode otorisasi Google. Silakan coba lagi.',
+  google_profile_failed: 'Gagal mengambil profil akun Google Anda.',
+  google_email_unverified: 'Alamat email pada akun Google Anda belum terverifikasi.',
+};
+
+/**
+ * Official 4-color Google "G" mark.
+ */
+function GoogleLogoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M23.745 12.27c0-.79-.07-1.54-.19-2.27h-11.3v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"
+      />
+      <path
+        fill="#34A853"
+        d="M12.255 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96h-3.98v3.09C3.515 21.3 7.565 24 12.255 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.525 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62h-3.98a11.86 11.86 0 0 0 0 10.76l3.98-3.09z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12.255 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C18.205 1.19 15.495 0 12.255 0c-4.69 0-8.74 2.7-10.71 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"
+      />
+    </svg>
+  );
+}
 
 /**
  * Authentication screen for login and registration.
@@ -20,6 +56,32 @@ export function AuthScreen({ oauthNotice = false } = {}) {
   const register = useBoardStore((s) => s.register);
   const theme = useBoardStore((s) => s.theme);
   const toggleTheme = useBoardStore((s) => s.toggleTheme);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('auth_error');
+    if (code) {
+      setError(
+        AUTH_ERROR_MESSAGES[/** @type {keyof typeof AUTH_ERROR_MESSAGES} */ (code)] ||
+          'Gagal masuk menggunakan akun Google. Silakan coba lagi.',
+      );
+      params.delete('auth_error');
+      const nextSearch = params.toString();
+      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}`;
+      try {
+        window.history.replaceState({}, '', nextUrl);
+      } catch {
+        // Ignore history API restrictions in non-browser test runners
+      }
+    }
+  }, []);
+
+  const currentReturnTo =
+    typeof window !== 'undefined' && window.location.pathname === '/oauth/authorize'
+      ? `${window.location.pathname}${window.location.search}`
+      : '/';
+  const googleAuthHref = `/api/auth/google?returnTo=${encodeURIComponent(currentReturnTo)}`;
 
   /** @param {'login' | 'register'} nextMode */
   function switchMode(nextMode) {
@@ -246,6 +308,20 @@ export function AuthScreen({ oauthNotice = false } = {}) {
             </button>
           </form>
         </div>
+
+        <div className="my-4 flex items-center gap-3" aria-hidden="true">
+          <div className="h-px flex-1 bg-[#E2E8F0]" />
+          <span className="text-xs text-[#64748B]">atau</span>
+          <div className="h-px flex-1 bg-[#E2E8F0]" />
+        </div>
+
+        <a
+          href={googleAuthHref}
+          className="w-full inline-flex items-center justify-center gap-2.5 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-4 py-2.5 text-sm font-medium text-[#0F172A] hover:bg-[#F1F5F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] focus-visible:ring-offset-2 transition-colors"
+        >
+          <GoogleLogoIcon />
+          <span>{mode === 'register' ? 'Daftar dengan Google' : 'Masuk dengan Google'}</span>
+        </a>
 
       </div>
       <footer className="mt-5 text-xs text-[#64748B] text-center">

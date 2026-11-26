@@ -59,9 +59,12 @@ describe('FlowBoard UI integration', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false);
     expect(window.localStorage.getItem('flowboard-theme')).toBe('light');
 
-    // Switching between Login and Register tabs works cleanly
+    // Switching between Login and Register tabs works cleanly (including Google OAuth CTA label)
+    const googleLink = screen.getByRole('link', { name: 'Masuk dengan Google' });
+    expect(googleLink).toHaveAttribute('href', '/api/auth/google?returnTo=%2F');
     await user.click(screen.getByRole('tab', { name: 'Daftar Akun' }));
     expect(screen.getByLabelText('Nama Lengkap')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Daftar dengan Google' })).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Masuk' }));
     expect(screen.queryByLabelText('Nama Lengkap')).not.toBeInTheDocument();
 
@@ -762,12 +765,15 @@ p "1" -- "N" t : "MELAKUKAN"
       '?client_id=fb_cli_test&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback&response_type=code&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&state=abc';
     window.history.replaceState({}, '', `/oauth/authorize${oauthQuery}`);
 
-    // 1. Unauthenticated visitor sees AuthScreen with OAuth notice banner
+    // 1. Unauthenticated visitor sees AuthScreen with OAuth notice banner and Google login preserving returnTo
     vi.spyOn(apiClient, 'getMe').mockRejectedValueOnce(new Error('Unauthorized'));
     const guestRender = render(<App />);
     expect(
       await screen.findByText(/melanjutkan otorisasi koneksi AI \(MCP OAuth 2\.1\)/i),
     ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Masuk dengan Google' }).getAttribute('href')).toContain(
+      encodeURIComponent('/oauth/authorize'),
+    );
     guestRender.unmount();
 
     // 2. Authenticated Free user sees Pro paywall on consent screen (cannot approve)

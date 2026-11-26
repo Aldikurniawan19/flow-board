@@ -18,9 +18,9 @@ import {
 
 /**
  * Create configured Express application.
- * @param {{ db: import('./db.js').FlowBoardDb, enableRateLimit?: boolean, serveStatic?: boolean }} options
+ * @param {{ db: import('./db.js').FlowBoardDb, enableRateLimit?: boolean, serveStatic?: boolean, googleFetcher?: typeof fetch }} options
  */
-export function createApp({ db, enableRateLimit = true, serveStatic = true }) {
+export function createApp({ db, enableRateLimit = true, serveStatic = true, googleFetcher }) {
   const app = express();
 
   app.set('trust proxy', 1);
@@ -46,7 +46,7 @@ export function createApp({ db, enableRateLimit = true, serveStatic = true }) {
   });
 
   app.use('/api', requireCsrfHeader);
-  app.use('/api/auth', createAuthRouter(db, { enableRateLimit }));
+  app.use('/api/auth', createAuthRouter(db, { enableRateLimit, googleFetcher }));
   app.use('/api/boards', createBoardsRouter(db));
   app.use('/api/keys', createApiKeysRouter(db));
   app.use('/api/public', createPublicDraftsRouter(db, { enableRateLimit }));

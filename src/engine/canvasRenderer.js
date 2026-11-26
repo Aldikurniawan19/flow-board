@@ -32,17 +32,17 @@ export function getSvgPathFromStroke(stroke) {
   return d.join(' ');
 }
 
-export const DARK_CANVAS_BG = '#0B1120';
+export const DARK_CANVAS_BG = '#000000';
 
 const DARK_STROKE_MAP = {
-  '#0F172A': '#F1F5F9',
-  '#1E293B': '#E2E8F0',
-  '#000000': '#F1F5F9',
-  '#334155': '#CBD5E1',
-  '#475569': '#CBD5E1',
-  '#666666': '#CBD5E1',
-  '#E2E8F0': '#334155',
-  '#CBD5E1': '#475569',
+  '#0F172A': '#F5F5F5',
+  '#1E293B': '#E5E5E5',
+  '#000000': '#F5F5F5',
+  '#334155': '#D4D4D4',
+  '#475569': '#D4D4D4',
+  '#666666': '#D4D4D4',
+  '#E2E8F0': '#2E2E2E',
+  '#CBD5E1': '#404040',
   '#1D4ED8': '#60A5FA',
   '#1E40AF': '#60A5FA',
   '#1565C0': '#60A5FA',
@@ -54,22 +54,22 @@ const DARK_STROKE_MAP = {
 };
 
 const DARK_FILL_MAP = {
-  '#FFFFFF': '#1E293B',
-  '#F8FAFC': '#172033',
-  '#F5F5F5': '#172033',
-  '#F1F5F9': '#253349',
-  '#E2E8F0': '#334155',
-  '#DBEAFE': '#1E3A5F',
-  '#DCFCE7': '#143A29',
-  '#FEF3C7': '#3F2E14',
-  '#FEE2E2': '#441C24',
-  '#CFFAFE': '#143A47',
-  '#0F172A': '#F1F5F9',
-  '#1E293B': '#E2E8F0',
-  '#000000': '#F1F5F9',
-  '#334155': '#CBD5E1',
-  '#475569': '#CBD5E1',
-  '#666666': '#CBD5E1',
+  '#FFFFFF': '#121212',
+  '#F8FAFC': '#0D0D0D',
+  '#F5F5F5': '#0D0D0D',
+  '#F1F5F9': '#1A1A1A',
+  '#E2E8F0': '#262626',
+  '#DBEAFE': '#122645',
+  '#DCFCE7': '#0D2B1D',
+  '#FEF3C7': '#2E200B',
+  '#FEE2E2': '#35121A',
+  '#CFFAFE': '#0D2A33',
+  '#0F172A': '#F5F5F5',
+  '#1E293B': '#E5E5E5',
+  '#000000': '#F5F5F5',
+  '#334155': '#D4D4D4',
+  '#475569': '#D4D4D4',
+  '#666666': '#D4D4D4',
   '#1D4ED8': '#60A5FA',
   '#15803D': '#4ADE80',
   '#B45309': '#FBBF24',
@@ -121,9 +121,9 @@ export function adaptColorForDarkCanvas(color, kind) {
   const toHex = (/** @type {number} */ v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
 
   if (kind === 'fill' && lum >= 0.76) {
-    // Convert bright paper/pastel fills into subtle dark-mode tinted surfaces
-    const mix = (/** @type {number} */ c, /** @type {number} */ base) => base + (c - 180) * 0.25;
-    return `#${toHex(mix(rgb.r, 30))}${toHex(mix(rgb.g, 41))}${toHex(mix(rgb.b, 59))}`;
+    // Convert bright paper/pastel fills into subtle neutral dark-charcoal tinted surfaces
+    const mix = (/** @type {number} */ c, /** @type {number} */ base) => base + (c - 180) * 0.22;
+    return `#${toHex(mix(rgb.r, 18))}${toHex(mix(rgb.g, 18))}${toHex(mix(rgb.b, 18))}`;
   }
 
   if (lum <= 0.32) {
@@ -191,14 +191,14 @@ function drawGrid(ctx, width, height, camera, gridMode, isDark = false) {
 
   ctx.save();
   if (gridMode === 'dots') {
-    ctx.fillStyle = isDark ? '#334155' : '#CBD5E1';
+    ctx.fillStyle = isDark ? '#262626' : '#CBD5E1';
     for (let x = startX; x < width; x += step) {
       for (let y = startY; y < height; y += step) {
         ctx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
       }
     }
   } else {
-    ctx.strokeStyle = isDark ? '#1E293B' : '#E2E8F0';
+    ctx.strokeStyle = isDark ? '#141414' : '#E2E8F0';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = startX; x < width; x += step) {
@@ -268,13 +268,13 @@ export function drawConnectorLabel(ctx, el, elementsById, isDark = false) {
   const by = routed.labelPosition.y - boxH / 2;
 
   // Report-clean knockout mask (matches canvas background, crisp text without cluttered box borders)
-  ctx.fillStyle = isDark ? 'rgba(11, 17, 32, 0.92)' : 'rgba(255, 255, 255, 0.94)';
+  ctx.fillStyle = isDark ? 'rgba(0, 0, 0, 0.94)' : 'rgba(255, 255, 255, 0.94)';
   ctx.beginPath();
   ctx.roundRect?.(bx, by, boxW, boxH, 3);
   if (!ctx.roundRect) ctx.rect(bx, by, boxW, boxH);
   ctx.fill();
 
-  ctx.fillStyle = isDark ? '#F1F5F9' : '#0F172A';
+  ctx.fillStyle = isDark ? '#FAFAFA' : '#0F172A';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   lines.forEach((line, idx) => {
@@ -464,7 +464,7 @@ export function renderCanvasScene(canvas, state) {
   }
 
   const uiAccent = isDark ? '#60A5FA' : UI_TOKENS.brandPrimary;
-  const handleFill = isDark ? '#0F172A' : '#FFFFFF';
+  const handleFill = isDark ? '#000000' : '#FFFFFF';
 
   // Alignment guides
   if (state.guides.length > 0) {
@@ -677,12 +677,12 @@ export function renderCanvasScene(canvas, state) {
         const bh = fontSize + py * 2;
         const bx = knobWorld.x + 12 / state.camera.zoom;
         const by = knobWorld.y - bh / 2;
-        ctx.fillStyle = isDark ? '#E2E8F0' : '#0F172A';
+        ctx.fillStyle = isDark ? '#FAFAFA' : '#0F172A';
         ctx.beginPath();
         ctx.roundRect?.(bx, by, bw, bh, 4 / state.camera.zoom);
         if (!ctx.roundRect) ctx.rect(bx, by, bw, bh);
         ctx.fill();
-        ctx.fillStyle = isDark ? '#0F172A' : '#FFFFFF';
+        ctx.fillStyle = isDark ? '#000000' : '#FFFFFF';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(label, bx + bw / 2, by + bh / 2);

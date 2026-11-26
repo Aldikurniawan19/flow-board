@@ -37,11 +37,15 @@ declare module 'node:crypto' {
   export function createHash(alg: string): {
     update(data: string): { digest(enc: string): string };
   };
+  export function createHmac(alg: string, key: string): {
+    update(data: string): { digest(enc: string): string };
+  };
   export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
   const cryptoDefault: {
     randomUUID: typeof randomUUID;
     randomBytes: typeof randomBytes;
     createHash: typeof createHash;
+    createHmac: typeof createHmac;
     timingSafeEqual: typeof timingSafeEqual;
   };
   export default cryptoDefault;

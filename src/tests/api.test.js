@@ -757,4 +757,166 @@ P1 --> D1 : Simpan Resi
       }
     }
   });
+
+  it('supports Google OAuth 2.0 + PKCE login, account linking, CSRF state checks, and anti-open-redirect', async () => {
+    const prevId = process.env.GOOGLE_CLIENT_ID;
+    const prevSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+    try {
+      // 1. Unconfigured Google OAuth reports google:false and redirects safely with auth_error
+      delete process.env.GOOGLE_CLIENT_ID;
+      delete process.env.GOOGLE_CLIENT_SECRET;
+
+      const unconfProviders = await request(app).get('/api/auth/providers');
+      expect(unconfProviders.status).toBe(200);
+      expect(unconfProviders.body.google).toBe(false);
+
+      const unconfRedirect = await request(app).get('/api/auth/google');
+      expect(unconfRedirect.status).toBe(302);
+      expect(unconfRedirect.headers.location).toBe('/?auth_error=google_not_configured');
+
+      // 2. Configure Google OAuth with mocked external Google HTTP boundary
+      process.env.GOOGLE_CLIENT_ID = 'test-google-client-id.apps.googleusercontent.com';
+      process.env.GOOGLE_CLIENT_SECRET = 'test-google-client-secret-value';
+
+      /** @type {{ sub: string, email: string, email_verified: boolean, name: string }} */
+      let mockProfile = {
+        sub: 'google-sub-1001',
+        email: 'sari.google@example.com',
+        email_verified: true,
+        name: 'Sari Google',
+      };
+
+      /** @type {typeof fetch} */
+      const mockGoogleFetch = async (url, init) => {
+        const target = String(url);
+        if (target.includes('oauth2.googleapis.com/token')) {
+          const bodyStr = String(init?.body || '');
+          expect(bodyStr).toContain('code_verifier=');
+          expect(bodyStr).toContain('client_secret=test-google-client-secret-value');
+          return /** @type {any} */ ({
+            ok: true,
+            json: async () => ({ access_token: 'google_access_mock_token' }),
+          });
+        }
+        if (target.includes('openidconnect.googleapis.com/v1/userinfo')) {
+          return /** @type {any} */ ({
+            ok: true,
+            json: async () => mockProfile,
+          });
+        }
+        throw new Error(`Unexpected fetch URL: ${target}`);
+      };
+
+      const googleApp = createApp({ db, enableRateLimit: false, googleFetcher: mockGoogleFetch });
+
+      const confProviders = await request(googleApp).get('/api/auth/providers');
+      expect(confProviders.status).toBe(200);
+      expect(confProviders.body.google).toBe(true);
+
+      // 3. Anti-Open-Redirect: external returnTo is sanitized back to '/'
+      const evilAgent = request.agent(googleApp);
+      const evilStart = await evilAgent.get('/api/auth/google?returnTo=https://evil.example.com/phish');
+      expect(evilStart.status).toBe(302);
+      const googleAuthUrl = new URL(evilStart.headers.location);
+      expect(googleAuthUrl.origin).toBe('https://accounts.google.com');
+      expect(googleAuthUrl.searchParams.get('code_challenge_method')).toBe('S256');
+      const state1 = googleAuthUrl.searchParams.get('state') || '';
+      expect(state1.length).toBeGreaterThan(20);
+
+      // 4. Login CSRF protection: mismatched state is rejected
+      const badStateCb = await evilAgent.get('/api/auth/google/callback?code=mock-code&state=wrong-state');
+      expect(badStateCb.status).toBe(302);
+      expect(badStateCb.headers.location).toBe('/?auth_error=google_invalid_state');
+
+      // 5. Rejects unverified Google email
+      const unverifiedAgent = request.agent(googleApp);
+      const unvStart = await unverifiedAgent.get('/api/auth/google');
+      const unvState = new URL(unvStart.headers.location).searchParams.get('state') || '';
+      mockProfile = {
+        sub: 'google-sub-unverified',
+        email: 'unverified@example.com',
+        email_verified: false,
+        name: 'Unverified',
+      };
+      const unvCb = await unverifiedAgent.get(
+        `/api/auth/google/callback?code=mock-code&state=${encodeURIComponent(unvState)}`,
+      );
+      expect(unvCb.status).toBe(302);
+      expect(unvCb.headers.location).toBe('/?auth_error=google_email_unverified');
+
+      // 6. Happy path: new Google user creates account + initial board + preserves safe /oauth/authorize returnTo
+      mockProfile = {
+        sub: 'google-sub-1001',
+        email: 'sari.google@example.com',
+        email_verified: true,
+        name: 'Sari Google',
+      };
+      const newAgent = request.agent(googleApp);
+      const returnPath = '/oauth/authorize?client_id=fb_cli_demo&state=s1';
+      const startRes = await newAgent.get(
+        `/api/auth/google?returnTo=${encodeURIComponent(returnPath)}`,
+      );
+      expect(startRes.status).toBe(302);
+      const validState = new URL(startRes.headers.location).searchParams.get('state') || '';
+
+      const cbRes = await newAgent.get(
+        `/api/auth/google/callback?code=valid-google-code&state=${encodeURIComponent(validState)}`,
+      );
+      expect(cbRes.status).toBe(302);
+      expect(cbRes.headers.location).toBe(returnPath);
+
+      const meRes = await newAgent.get('/api/auth/me');
+      expect(meRes.status).toBe(200);
+      expect(meRes.body.user.email).toBe('sari.google@example.com');
+      expect(meRes.body.user.name).toBe('Sari Google');
+
+      const boardsRes = await newAgent.get('/api/boards');
+      expect(boardsRes.status).toBe(200);
+      expect(boardsRes.body.boards).toHaveLength(1);
+
+      // Password login on Google-only account returns friendly 401
+      const pwdAttempt = await request(googleApp).post('/api/auth/login').set(CSRF).send({
+        email: 'sari.google@example.com',
+        password: 'AnyPassword123',
+      });
+      expect(pwdAttempt.status).toBe(401);
+      expect(pwdAttempt.body.error).toContain('Google');
+
+      // 7. Account linking: existing email+password account links google_sub & keeps existing boards
+      const existingAgent = request.agent(googleApp);
+      await existingAgent.post('/api/auth/register').set(CSRF).send({
+        name: 'Andi Lama',
+        email: 'andi.lama@example.com',
+        password: 'PasswordKuat123',
+      });
+      await existingAgent.post('/api/boards').set(CSRF).send({ title: 'Papan Lama Andi' });
+
+      mockProfile = {
+        sub: 'google-sub-andi-999',
+        email: 'andi.lama@example.com',
+        email_verified: true,
+        name: 'Andi Google',
+      };
+      const linkAgent = request.agent(googleApp);
+      const linkStart = await linkAgent.get('/api/auth/google');
+      const linkState = new URL(linkStart.headers.location).searchParams.get('state') || '';
+      const linkCb = await linkAgent.get(
+        `/api/auth/google/callback?code=link-code&state=${encodeURIComponent(linkState)}`,
+      );
+      expect(linkCb.status).toBe(302);
+      expect(linkCb.headers.location).toBe('/');
+
+      const linkedBoards = await linkAgent.get('/api/boards');
+      expect(linkedBoards.status).toBe(200);
+      expect(linkedBoards.body.boards.some((/** @type {any} */ b) => b.title === 'Papan Lama Andi')).toBe(
+        true,
+      );
+    } finally {
+      if (prevId === undefined) delete process.env.GOOGLE_CLIENT_ID;
+      else process.env.GOOGLE_CLIENT_ID = prevId;
+      if (prevSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
+      else process.env.GOOGLE_CLIENT_SECRET = prevSecret;
+    }
+  });
 });

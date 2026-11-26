@@ -8,10 +8,12 @@ const SCHEMA_STATEMENTS = [
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    google_sub TEXT,
     plan TEXT NOT NULL DEFAULT 'free',
     plan_expires_at TEXT,
     created_at TEXT NOT NULL
   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)`,
   `CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -158,6 +160,10 @@ export function createPostgresDatabase(connectionString) {
           `ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'`,
         );
         await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TEXT`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT`);
+        await pool.query(
+          `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)`,
+        );
       })().catch((err) => {
         initPromise = null;
         throw err;
@@ -217,6 +223,10 @@ export async function createSqliteDatabase(dbPath = './data/flowboard.sqlite') {
   }
   if (!colNames.has('plan_expires_at')) {
     raw.exec(`ALTER TABLE users ADD COLUMN plan_expires_at TEXT;`);
+  }
+  if (!colNames.has('google_sub')) {
+    raw.exec(`ALTER TABLE users ADD COLUMN google_sub TEXT;`);
+    raw.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub);`);
   }
 
   return {
