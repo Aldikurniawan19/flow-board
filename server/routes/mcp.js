@@ -1,6 +1,6 @@
 import express from 'express';
 import { z } from 'zod';
-import { authenticateApiKey, extractBearerToken } from '../middleware/auth.js';
+import { authenticateBearerToken, extractBearerToken } from '../middleware/auth.js';
 import { applyExternalApiCors, createRateLimiter } from '../middleware/security.js';
 import {
   DIAGRAM_KINDS,
@@ -139,11 +139,30 @@ function toolContent(payload, isError = false) {
 }
 
 /**
+ * Build RFC 9728 / MCP OAuth 2.1 `WWW-Authenticate` challenge header so remote MCP clients
+ * (Claude.ai, ChatGPT, Gemini Enterprise, Cursor, MCP Inspector) discover OAuth automatically.
+ * @param {string} baseUrl
+ * @param {string} [oauthError]
+ */
+function buildWwwAuthenticateHeader(baseUrl, oauthError) {
+  const parts = [
+    'Bearer realm="FlowBoard MCP"',
+    `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+    'scope="mcp:tools"',
+  ];
+  if (oauthError) {
+    parts.push(`error="${oauthError}"`);
+  }
+  return parts.join(', ');
+}
+
+/**
  * Create Streamable HTTP MCP Server router mounted at /api/mcp.
- * Supports optional Bearer API key auth:
- * - Valid Bearer key: full workspace access (generate_diagram saves directly into user boards, list/get/delete boards).
- * - No Authorization header: public mode (generate_diagram creates shareable public draft URLs, syntax guide accessible).
- * - Invalid Bearer key: rejected with 401.
+ * Supports both:
+ * - OAuth 2.1 Bearer access tokens (`fbo_...`) via 1-click Login dengan FlowBoard + DCR + PKCE
+ * - Personal API keys (`fbk_...`) for CLI/desktop MCP clients
+ * Unauthenticated or invalid requests receive `401 Unauthorized` with RFC 9728 `WWW-Authenticate`
+ * so OAuth-capable MCP clients automatically trigger the FlowBoard consent flow.
  * @param {import('../db.js').FlowBoardDb} db
  * @param {{ enableRateLimit?: boolean }} [options]
  */
@@ -158,17 +177,46 @@ export function createMcpRouter(db, options = {}) {
   router.use(applyExternalApiCors);
   router.use(mcpRateLimit);
 
-  router.get('/', (req, res) => {
-    const baseUrl = resolveBaseUrl(req);
-    return res.status(200).json({
-      name: 'flowboard-mcp',
-      version: '1.0.0',
-      protocol: 'MCP Streamable HTTP (JSON-RPC 2.0 via POST)',
-      endpoint: `${baseUrl}/api/mcp`,
-      openApiUrl: `${baseUrl}/api/openapi.json`,
-      llmsTxtUrl: `${baseUrl}/llms.txt`,
-      tools: MCP_TOOLS.map((t) => t.name),
-    });
+  router.get('/', async (req, res, next) => {
+    try {
+      const baseUrl = resolveBaseUrl(req);
+      const accept = req.get('Accept') || '';
+      if (accept.includes('text/event-stream')) {
+        const token = extractBearerToken(req);
+        const auth = token
+          ? await authenticateBearerToken(db, token, `${baseUrl}/api/mcp`)
+          : null;
+        if (!auth) {
+          res.setHeader(
+            'WWW-Authenticate',
+            buildWwwAuthenticateHeader(baseUrl, token ? 'invalid_token' : undefined),
+          );
+          return res.status(401).json({
+            error: 'Autentikasi OAuth 2.1 atau API Key diperlukan untuk MCP Server FlowBoard.',
+          });
+        }
+        return res.status(405).json({
+          error: 'FlowBoard MCP menggunakan Streamable HTTP stateless melalui metode POST.',
+        });
+      }
+
+      return res.status(200).json({
+        name: 'flowboard-mcp',
+        version: '1.1.0',
+        protocol: 'MCP Streamable HTTP (JSON-RPC 2.0 via POST)',
+        endpoint: `${baseUrl}/api/mcp`,
+        oauth: {
+          protectedResourceMetadata: `${baseUrl}/.well-known/oauth-protected-resource`,
+          authorizationServerMetadata: `${baseUrl}/.well-known/oauth-authorization-server`,
+          registrationEndpoint: `${baseUrl}/api/oauth/register`,
+        },
+        openApiUrl: `${baseUrl}/api/openapi.json`,
+        llmsTxtUrl: `${baseUrl}/llms.txt`,
+        tools: MCP_TOOLS.map((t) => t.name),
+      });
+    } catch (err) {
+      return next(err);
+    }
   });
 
   router.post('/', async (req, res, next) => {
@@ -176,28 +224,37 @@ export function createMcpRouter(db, options = {}) {
       const body = /** @type {Record<string, any> | null} */ (
         req.body && typeof req.body === 'object' ? req.body : null
       );
+      const baseUrl = resolveBaseUrl(req);
 
       const token = extractBearerToken(req);
-      /** @type {{ id: string, name: string, email: string, plan: 'free' | 'pro', isOwner: boolean, hasAiAccess: boolean } | null} */
-      let authUser = null;
-      if (token !== null) {
-        const auth = await authenticateApiKey(db, token);
-        if (!auth) {
-          return res.status(401).json(
-            rpcError(body?.id ?? null, -32001, 'API Key tidak valid atau telah dicabut.'),
-          );
-        }
-        if (!auth.user.hasAiAccess) {
-          return res.status(403).json(
-            rpcError(
-              body?.id ?? null,
-              -32003,
-              'Fitur Integrasi AI & MCP khusus untuk pelanggan FlowBoard Pro.',
-            ),
-          );
-        }
-        authUser = auth.user;
+      if (!token) {
+        res.setHeader('WWW-Authenticate', buildWwwAuthenticateHeader(baseUrl));
+        return res.status(401).json(
+          rpcError(
+            body?.id ?? null,
+            -32001,
+            'Autentikasi diperlukan. Hubungkan via OAuth 2.1 (Login dengan FlowBoard) atau sertakan Authorization: Bearer fbk_...',
+          ),
+        );
       }
+
+      const auth = await authenticateBearerToken(db, token, `${baseUrl}/api/mcp`);
+      if (!auth) {
+        res.setHeader('WWW-Authenticate', buildWwwAuthenticateHeader(baseUrl, 'invalid_token'));
+        return res.status(401).json(
+          rpcError(body?.id ?? null, -32001, 'Token akses OAuth atau API Key tidak valid atau telah dicabut.'),
+        );
+      }
+      if (!auth.user.hasAiAccess) {
+        return res.status(403).json(
+          rpcError(
+            body?.id ?? null,
+            -32003,
+            'Fitur Integrasi AI & MCP khusus untuk pelanggan FlowBoard Pro.',
+          ),
+        );
+      }
+      const authUser = auth.user;
 
       if (!body || body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
         return res
@@ -208,7 +265,6 @@ export function createMcpRouter(db, options = {}) {
       const id = body.id !== undefined ? body.id : null;
       const method = body.method;
       const params = body.params && typeof body.params === 'object' ? body.params : {};
-      const baseUrl = resolveBaseUrl(req);
 
       // JSON-RPC notifications (no id) return 202 Accepted
       if (method.startsWith('notifications/')) {

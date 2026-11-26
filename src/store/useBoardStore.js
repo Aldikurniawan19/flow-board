@@ -383,12 +383,15 @@ export const useBoardStore = create((set, get) => ({
   bootstrapAuth: async () => {
     set({ authStatus: 'loading', authError: '' });
 
+    const isOAuthFlow =
+      typeof window !== 'undefined' && window.location.pathname === '/oauth/authorize';
+
     /** @type {ReturnType<typeof parseIncomingDiagramLink>} */
     let incomingLink = null;
     /** @type {string | null} */
     let incomingBoardId = null;
 
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !isOAuthFlow) {
       const link = parseIncomingDiagramLink(window.location.search, window.location.hash);
       if (link) {
         if (link.type === 'board') {
@@ -407,6 +410,7 @@ export const useBoardStore = create((set, get) => ({
     try {
       const { user } = await apiClient.getMe();
       set({ user, authStatus: 'authenticated', guestPreviewMode: false });
+      if (isOAuthFlow) return;
       await get().loadBoards(incomingBoardId || undefined);
       if (incomingLink) {
         await get().handleAuthorizedDeepLink(incomingLink);
@@ -430,9 +434,12 @@ export const useBoardStore = create((set, get) => ({
 
   login: async (email, password) => {
     set({ authError: '' });
+    const isOAuthFlow =
+      typeof window !== 'undefined' && window.location.pathname === '/oauth/authorize';
     const { pendingDiagram, pendingBoardId, pendingDeepLink } = get();
     const { user } = await apiClient.login({ email, password });
     set({ user, authStatus: 'authenticated', authError: '', guestPreviewMode: false });
+    if (isOAuthFlow) return;
     await get().loadBoards(pendingBoardId || undefined);
     set({ pendingBoardId: null });
     if (pendingDeepLink) {
@@ -444,9 +451,12 @@ export const useBoardStore = create((set, get) => ({
 
   register: async (name, email, password) => {
     set({ authError: '' });
+    const isOAuthFlow =
+      typeof window !== 'undefined' && window.location.pathname === '/oauth/authorize';
     const { pendingDiagram, pendingBoardId, pendingDeepLink } = get();
     const { user } = await apiClient.register({ name, email, password });
     set({ user, authStatus: 'authenticated', authError: '', guestPreviewMode: false });
+    if (isOAuthFlow) return;
     await get().loadBoards(pendingBoardId || undefined);
     set({ pendingBoardId: null });
     if (pendingDeepLink) {

@@ -13,6 +13,7 @@ import {
   Loader2,
   MessageCircle,
   Plus,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Wand2,
@@ -142,6 +143,10 @@ export function AiIntegrationModal({ open, onClose }) {
     /** @type {Array<{ id: string, name: string, keyPrefix: string, createdAt: string, lastUsedAt: string | null }>} */ ([]),
   );
   const [loadingKeys, setLoadingKeys] = useState(false);
+  const [oauthConnections, setOauthConnections] = useState(
+    /** @type {Array<{ id: string, clientId: string, clientName: string, scope: string, createdAt: string, lastUsedAt: string | null }>} */ ([]),
+  );
+  const [revokingConnId, setRevokingConnId] = useState(/** @type {string | null} */ (null));
   const [keyName, setKeyName] = useState('');
   const [creating, setCreating] = useState(false);
   const [revokingId, setRevokingId] = useState(/** @type {string | null} */ (null));
@@ -180,10 +185,15 @@ export function AiIntegrationModal({ open, onClose }) {
     let cancelled = false;
     setLoadingKeys(true);
     setError('');
-    apiClient
-      .listApiKeys()
-      .then((res) => {
-        if (!cancelled) setKeys(res.keys || []);
+    Promise.all([
+      apiClient.listApiKeys(),
+      apiClient.listOAuthConnections().catch(() => ({ connections: [] })),
+    ])
+      .then(([keysRes, connRes]) => {
+        if (!cancelled) {
+          setKeys(keysRes.keys || []);
+          setOauthConnections(connRes?.connections || []);
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err?.message || 'Gagal memuat daftar API Key.');
@@ -280,6 +290,21 @@ export function AiIntegrationModal({ open, onClose }) {
       setError(/** @type {Error} */ (err)?.message || 'Gagal mencabut API Key.');
     } finally {
       setRevokingId(null);
+    }
+  }
+
+  /** @param {string} id */
+  async function handleRevokeConnection(id) {
+    if (revokingConnId) return;
+    setRevokingConnId(id);
+    setError('');
+    try {
+      await apiClient.revokeOAuthConnection(id);
+      setOauthConnections((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      setError(/** @type {Error} */ (err)?.message || 'Gagal mencabut koneksi aplikasi AI.');
+    } finally {
+      setRevokingConnId(null);
     }
   }
 
@@ -604,6 +629,22 @@ export function AiIntegrationModal({ open, onClose }) {
 
           {activeTab === 'mcp' ? (
             <>
+              {/* 1-Click OAuth 2.1 + DCR Banner */}
+              <div className="rounded-lg border border-[#1D4ED8]/25 bg-[#DBEAFE]/40 p-3.5 space-y-1.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="inline-flex items-center gap-1.5 font-semibold text-[#0F172A]">
+                    <ShieldCheck className="h-4 w-4 text-[#1D4ED8]" strokeWidth={1.75} aria-hidden="true" />
+                    <span>Koneksi 1-Klik via OAuth 2.1 + DCR (Claude.ai Web / ChatGPT / Gemini Enterprise)</span>
+                  </div>
+                  <span className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-semibold text-[#15803D] leading-none">
+                    Tanpa API Key Manual
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#475569] leading-relaxed">
+                  Cukup tempel <strong>Endpoint MCP</strong> di bawah pada menu Connector / Remote MCP klien AI Anda. Jendela <strong>&ldquo;Login dengan FlowBoard&rdquo;</strong> akan muncul otomatis (mendukung RFC 9728, RFC 8414, Dynamic Client Registration, dan PKCE S256).
+                </p>
+              </div>
+
               {/* Endpoints */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3 space-y-1.5">
@@ -746,6 +787,50 @@ export function AiIntegrationModal({ open, onClose }) {
                           className="p-1.5 rounded-md text-[#475569] hover:bg-[#FEE2E2] hover:text-[#B91C1C] disabled:opacity-40 shrink-0"
                         >
                           {revokingId === k.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Connected OAuth AI Apps */}
+              <div className="rounded-lg border border-[#E2E8F0] p-3.5 space-y-2.5">
+                <div>
+                  <h3 className="font-semibold text-[#0F172A]">Aplikasi AI Terhubung (OAuth 2.1)</h3>
+                  <p className="text-[11px] text-[#475569] mt-0.5">
+                    Daftar klien AI yang Anda izinkan lewat tombol &ldquo;Login dengan FlowBoard&rdquo;. Cabut akses kapan saja.
+                  </p>
+                </div>
+                {oauthConnections.length === 0 ? (
+                  <p className="text-[11px] text-[#475569] py-0.5">
+                    Belum ada aplikasi AI yang terhubung lewat OAuth 2.1.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-[#E2E8F0] rounded-lg border border-[#E2E8F0] overflow-hidden">
+                    {oauthConnections.map((conn) => (
+                      <li
+                        key={conn.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2 bg-[#FFFFFF]"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium text-[#0F172A] truncate">{conn.clientName}</div>
+                          <div className="text-[11px] text-[#475569] font-mono-tabular">
+                            Scope: {conn.scope} &bull; Dipakai: {formatDate(conn.lastUsedAt)}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={revokingConnId === conn.id}
+                          onClick={() => handleRevokeConnection(conn.id)}
+                          aria-label={`Cabut koneksi OAuth ${conn.clientName}`}
+                          className="p-1.5 rounded-md text-[#475569] hover:bg-[#FEE2E2] hover:text-[#B91C1C] disabled:opacity-40 shrink-0"
+                        >
+                          {revokingConnId === conn.id ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
                             <Trash2 className="h-3.5 w-3.5" />

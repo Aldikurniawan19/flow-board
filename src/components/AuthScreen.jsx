@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { AlertCircle, Eye, EyeOff, Layers, Loader2, Lock, Mail, Moon, Sun, User } from 'lucide-react';
 import { useBoardStore } from '../store/useBoardStore.js';
 
-export function AuthScreen() {
+/**
+ * Authentication screen for login and registration.
+ * @param {{ oauthNotice?: boolean }} [props]
+ */
+export function AuthScreen({ oauthNotice = false } = {}) {
   const [mode, setMode] = useState(/** @type {'login' | 'register'} */ ('login'));
   const [slideDir, setSlideDir] = useState(/** @type {'none' | 'left' | 'right'} */ ('none'));
   const [name, setName] = useState('');
@@ -76,6 +80,12 @@ export function AuthScreen() {
           </div>
           <h1 className="text-xl font-semibold tracking-tight text-[#0F172A]">FlowBoard</h1>
         </div>
+
+        {oauthNotice && (
+          <div className="mb-4 rounded-lg border border-[#1D4ED8]/25 bg-[#DBEAFE]/50 px-3 py-2 text-xs text-[#1E3A8A] text-center leading-relaxed">
+            Masuk ke akun FlowBoard Anda untuk melanjutkan otorisasi koneksi AI (MCP OAuth 2.1).
+          </div>
+        )}
 
         <div
           role="tablist"

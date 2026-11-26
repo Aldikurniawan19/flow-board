@@ -641,6 +641,19 @@ describe('FlowBoard UI integration', () => {
       });
     });
     vi.spyOn(apiClient, 'listApiKeys').mockResolvedValue({ keys: [] });
+    vi.spyOn(apiClient, 'listOAuthConnections').mockResolvedValue({
+      connections: [
+        {
+          id: 'conn-1',
+          clientId: 'fb_cli_claude',
+          clientName: 'Claude.ai Web',
+          scope: 'mcp:tools',
+          createdAt: '2026-11-26T00:00:00.000Z',
+          lastUsedAt: null,
+        },
+      ],
+    });
+    vi.spyOn(apiClient, 'revokeOAuthConnection').mockResolvedValue({ ok: true });
     vi.spyOn(apiClient, 'createApiKey').mockResolvedValue({
       apiKey: {
         id: 'key-1',
@@ -656,6 +669,11 @@ describe('FlowBoard UI integration', () => {
     await user.click(screen.getByRole('button', { name: /Menu PlantText dan Ekspor Impor/i }));
     await user.click(screen.getByRole('menuitem', { name: /Integrasi AI & MCP/i }));
     expect(screen.getByRole('heading', { name: 'Integrasi AI & MCP Server' })).toBeInTheDocument();
+    expect(await screen.findByText('Claude.ai Web')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cabut koneksi OAuth Claude.ai Web' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Cabut koneksi OAuth Claude.ai Web' })).not.toBeInTheDocument();
+    });
     await user.type(screen.getByLabelText('Nama API Key'), 'Claude Desktop');
     await user.click(screen.getByRole('button', { name: 'Buat Key' }));
     expect(
@@ -735,6 +753,83 @@ p "1" -- "N" t : "MELAKUKAN"
     await waitFor(() => {
       expect(useBoardStore.getState().boardTitle).toBe('ERD Rental AI');
       expect(apiClient.createBoard).toHaveBeenCalled();
+    });
+  });
+
+  it('renders OAuth 2.1 login prompt and consent screen on /oauth/authorize for Pro/Owner vs Free users', async () => {
+    const oauthQuery =
+      '?client_id=fb_cli_test&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback&response_type=code&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&state=abc';
+    window.history.replaceState({}, '', `/oauth/authorize${oauthQuery}`);
+
+    // 1. Unauthenticated visitor sees AuthScreen with OAuth notice banner
+    vi.spyOn(apiClient, 'getMe').mockRejectedValueOnce(new Error('Unauthorized'));
+    const guestRender = render(<App />);
+    expect(
+      await screen.findByText(/melanjutkan otorisasi koneksi AI \(MCP OAuth 2\.1\)/i),
+    ).toBeInTheDocument();
+    guestRender.unmount();
+
+    // 2. Authenticated Free user sees Pro paywall on consent screen (cannot approve)
+    vi.spyOn(apiClient, 'getMe').mockResolvedValueOnce({
+      user: {
+        id: 'u-free',
+        name: 'Budi Free',
+        email: 'free@example.com',
+        plan: 'free',
+        isOwner: false,
+        hasAiAccess: false,
+      },
+    });
+    vi.spyOn(apiClient, 'getOAuthAuthorizeInfo').mockResolvedValue({
+      client: {
+        clientId: 'fb_cli_test',
+        clientName: 'Claude.ai Web',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
+        redirectHost: 'claude.ai',
+      },
+      scope: 'mcp:tools',
+      resource: 'https://flow-board-dun.vercel.app/api/mcp',
+      state: 'abc',
+    });
+
+    const freeRender = render(<App />);
+    expect(
+      await screen.findByRole('heading', { name: 'Hubungkan Claude.ai Web ke FlowBoard' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Koneksi MCP OAuth Khusus FlowBoard Pro/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Izinkan & Hubungkan' })).not.toBeInTheDocument();
+    freeRender.unmount();
+
+    // 3. Authenticated Owner/Pro user can approve OAuth consent
+    vi.spyOn(apiClient, 'getMe').mockResolvedValueOnce({
+      user: {
+        id: 'u-own',
+        name: 'Aldi Owner',
+        email: 'owner@example.com',
+        plan: 'pro',
+        isOwner: true,
+        hasAiAccess: true,
+      },
+    });
+    const decisionSpy = vi
+      .spyOn(apiClient, 'submitOAuthDecision')
+      .mockResolvedValue({ redirectTo: '' });
+
+    const user = userEvent.setup();
+    render(<App />);
+    expect(
+      await screen.findByRole('heading', { name: 'Hubungkan Claude.ai Web ke FlowBoard' }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Izinkan & Hubungkan' }));
+    await waitFor(() => {
+      expect(decisionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          decision: 'approve',
+          client_id: 'fb_cli_test',
+          code_challenge_method: 'S256',
+          state: 'abc',
+        }),
+      );
     });
   });
 });

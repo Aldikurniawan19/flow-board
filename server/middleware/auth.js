@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 
 export const SESSION_COOKIE_NAME = 'fb_session';
 export const API_KEY_PREFIX = 'fbk_';
+export const OAUTH_ACCESS_TOKEN_PREFIX = 'fbo_';
+export const OAUTH_REFRESH_TOKEN_PREFIX = 'fbr_';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
@@ -128,6 +130,95 @@ export async function authenticateApiKey(db, rawKey) {
     keyId: row.key_id,
     user: buildAuthUser(row),
   };
+}
+
+/**
+ * Normalize an OAuth resource URI for strict RFC 8707 audience comparison.
+ * @param {string | null | undefined} value
+ * @returns {string | null}
+ */
+export function normalizeResourceUri(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    const cleanPath = parsed.pathname.replace(/\/+$/, '') || '/';
+    return `${parsed.origin.toLowerCase()}${cleanPath === '/' ? '' : cleanPath}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validate an OAuth 2.1 Bearer access token (`fbo_...`) against the database,
+ * checking expiration, revocation, and optional RFC 8707 resource audience binding.
+ * @param {import('../db.js').FlowBoardDb} db
+ * @param {string} rawToken
+ * @param {string} [expectedResource]
+ * @returns {Promise<{ user: { id: string, name: string, email: string, plan: 'free' | 'pro', isOwner: boolean, hasAiAccess: boolean }, tokenId: string, clientId: string, scope: string } | null>}
+ */
+export async function authenticateOAuthAccessToken(db, rawToken, expectedResource) {
+  if (!rawToken || !rawToken.startsWith(OAUTH_ACCESS_TOKEN_PREFIX) || rawToken.length < 24) {
+    return null;
+  }
+  const tokenHash = hashSessionToken(rawToken);
+  const row = /** @type {{ token_id: string, client_id: string, scope: string, resource: string | null, expires_at: string, revoked_at: string | null, id: string, name: string, email: string, plan?: string, plan_expires_at?: string | null } | undefined} */ (
+    await db.get(
+      `SELECT t.id AS token_id, t.client_id, t.scope, t.resource, t.expires_at, t.revoked_at,
+              u.id, u.name, u.email, u.plan, u.plan_expires_at
+       FROM oauth_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE t.access_token_hash = ?`,
+      [tokenHash],
+    )
+  );
+  if (!row || row.revoked_at) return null;
+  if (new Date(row.expires_at).getTime() <= Date.now()) return null;
+
+  if (row.resource && expectedResource) {
+    const bound = normalizeResourceUri(row.resource);
+    const target = normalizeResourceUri(expectedResource);
+    const targetOrigin = target ? normalizeResourceUri(new URL(target).origin) : null;
+    if (bound && target && bound !== target && bound !== targetOrigin) {
+      return null;
+    }
+  }
+
+  await db
+    .run('UPDATE oauth_tokens SET last_used_at = ? WHERE id = ?', [
+      new Date().toISOString(),
+      row.token_id,
+    ])
+    .catch(() => {});
+
+  return {
+    tokenId: row.token_id,
+    clientId: row.client_id,
+    scope: row.scope,
+    user: buildAuthUser(row),
+  };
+}
+
+/**
+ * Authenticate any supported FlowBoard Bearer credential:
+ * - Personal API key (`fbk_...`)
+ * - OAuth 2.1 access token (`fbo_...`)
+ * @param {import('../db.js').FlowBoardDb} db
+ * @param {string} rawToken
+ * @param {string} [expectedResource]
+ * @returns {Promise<{ user: { id: string, name: string, email: string, plan: 'free' | 'pro', isOwner: boolean, hasAiAccess: boolean }, authType: 'api_key' | 'oauth', credentialId: string } | null>}
+ */
+export async function authenticateBearerToken(db, rawToken, expectedResource) {
+  if (!rawToken) return null;
+  if (rawToken.startsWith(OAUTH_ACCESS_TOKEN_PREFIX)) {
+    const oauth = await authenticateOAuthAccessToken(db, rawToken, expectedResource);
+    if (!oauth) return null;
+    return { user: oauth.user, authType: 'oauth', credentialId: oauth.tokenId };
+  }
+  const apiKey = await authenticateApiKey(db, rawToken);
+  if (!apiKey) return null;
+  return { user: apiKey.user, authType: 'api_key', credentialId: apiKey.keyId };
 }
 
 /**

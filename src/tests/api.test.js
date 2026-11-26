@@ -1,4 +1,5 @@
 // @vitest-environment node
+import crypto from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createDatabase } from '../../server/db.js';
@@ -186,7 +187,7 @@ describe('Auth & Boards API (Happy path, validation, & anti-IDOR security)', () 
       });
       expect(unauthDraftAttempt.status).toBe(401);
 
-      // Unauthenticated MCP generate_diagram is blocked (PRO_REQUIRED)
+      // Unauthenticated MCP request returns 401 + RFC 9728 WWW-Authenticate so OAuth clients trigger login
       const unauthMcpGen = await request(app)
         .post('/api/mcp')
         .send({
@@ -198,9 +199,10 @@ describe('Auth & Boards API (Happy path, validation, & anti-IDOR security)', () 
             arguments: { title: 'Blocked Guest', code: '@startuml\nentity A\n@enduml' },
           },
         });
-      expect(unauthMcpGen.status).toBe(200);
-      expect(unauthMcpGen.body.result.isError).toBe(true);
-      expect(unauthMcpGen.body.result.structuredContent.code).toBe('PRO_REQUIRED');
+      expect(unauthMcpGen.status).toBe(401);
+      expect(unauthMcpGen.headers['www-authenticate']).toContain(
+        '/.well-known/oauth-protected-resource',
+      );
 
       // 2. Owner account (via server-side OWNER_EMAILS) automatically has full AI/MCP access
       const agentA = request.agent(app);
@@ -261,6 +263,7 @@ describe('Auth & Boards API (Happy path, validation, & anti-IDOR security)', () 
 
       const toolsRes = await request(app)
         .post('/api/mcp')
+        .set('Authorization', `Bearer ${secretA}`)
         .send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
       expect(toolsRes.status).toBe(200);
       const toolNames = toolsRes.body.result.tools.map((/** @type {any} */ t) => t.name);
@@ -366,6 +369,354 @@ P1 --> D1 : Simpan Resi
         .get('/api/v1/boards')
         .set('Authorization', `Bearer ${secretA}`);
       expect(afterRevoke.status).toBe(401);
+    } finally {
+      if (prevOwnerEmails === undefined) {
+        delete process.env.OWNER_EMAILS;
+      } else {
+        process.env.OWNER_EMAILS = prevOwnerEmails;
+      }
+    }
+  });
+
+  it('supports full OAuth 2.1 + DCR + PKCE S256 + refresh rotation + revocation + anti-IDOR flow for MCP', async () => {
+    const prevOwnerEmails = process.env.OWNER_EMAILS;
+    process.env.OWNER_EMAILS = 'oauth-owner@example.com';
+
+    try {
+      const HOST = { Host: 'flowboard.example.test', 'X-Forwarded-Proto': 'https' };
+
+      // 1. RFC 9728 Protected Resource Metadata & RFC 8414 Authorization Server Metadata
+      const prmRoot = await request(app).get('/.well-known/oauth-protected-resource').set(HOST);
+      expect(prmRoot.status).toBe(200);
+      expect(prmRoot.body.resource).toBe('https://flowboard.example.test/api/mcp');
+      expect(prmRoot.body.authorization_servers).toEqual(['https://flowboard.example.test']);
+
+      const prmScoped = await request(app)
+        .get('/.well-known/oauth-protected-resource/api/mcp')
+        .set(HOST);
+      expect(prmScoped.status).toBe(200);
+      expect(prmScoped.body.resource).toBe(prmRoot.body.resource);
+
+      const asm = await request(app).get('/.well-known/oauth-authorization-server').set(HOST);
+      expect(asm.status).toBe(200);
+      expect(asm.body.authorization_endpoint).toBe('https://flowboard.example.test/oauth/authorize');
+      expect(asm.body.token_endpoint).toBe('https://flowboard.example.test/api/oauth/token');
+      expect(asm.body.registration_endpoint).toBe('https://flowboard.example.test/api/oauth/register');
+      expect(asm.body.code_challenge_methods_supported).toContain('S256');
+
+      // 2. Dynamic Client Registration (RFC 7591): reject unsafe redirect_uris, register valid HTTPS client
+      const unsafeReg = await request(app)
+        .post('/api/oauth/register')
+        .send({
+          client_name: 'Bad Client',
+          redirect_uris: ['javascript:alert(1)'],
+        });
+      expect(unsafeReg.status).toBe(400);
+      expect(unsafeReg.body.error).toBe('invalid_redirect_uri');
+
+      const nonLocalHttp = await request(app)
+        .post('/api/oauth/register')
+        .send({
+          client_name: 'Insecure HTTP Client',
+          redirect_uris: ['http://evil.example.com/callback'],
+        });
+      expect(nonLocalHttp.status).toBe(400);
+
+      const dcrRes = await request(app)
+        .post('/api/oauth/register')
+        .send({
+          client_name: 'Claude.ai Web',
+          redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+          token_endpoint_auth_method: 'none',
+        });
+      expect(dcrRes.status).toBe(201);
+      expect(dcrRes.body.client_id).toMatch(/^fb_cli_/);
+      const clientId = dcrRes.body.client_id;
+      const redirectUri = 'https://claude.ai/api/mcp/auth_callback';
+
+      // Create Owner user, Free user, and another Pro user B
+      const ownerAgent = request.agent(app);
+      await ownerAgent.post('/api/auth/register').set(CSRF).send({
+        name: 'OAuth Owner',
+        email: 'oauth-owner@example.com',
+        password: 'PasswordO123',
+      });
+
+      const freeAgent = request.agent(app);
+      await freeAgent.post('/api/auth/register').set(CSRF).send({
+        name: 'OAuth Free',
+        email: 'oauth-free@example.com',
+        password: 'PasswordF123',
+      });
+
+      const proAgentB = request.agent(app);
+      await proAgentB.post('/api/auth/register').set(CSRF).send({
+        name: 'OAuth Pro B',
+        email: 'oauth-prob@example.com',
+        password: 'PasswordB123',
+      });
+      await db.run('UPDATE users SET plan = ? WHERE email = ?', ['pro', 'oauth-prob@example.com']);
+
+      const makePkce = () => {
+        const verifier = crypto.randomBytes(32).toString('base64url');
+        const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+        return { verifier, challenge };
+      };
+
+      // 3. Anti-Open-Redirect & CSRF & Free-user enforcement on authorize endpoints
+      const pkce1 = makePkce();
+      const openRedirectCheck = await ownerAgent.get(
+        `/api/oauth/authorize/info?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent('https://evil.example.com/steal')}&response_type=code&code_challenge=${pkce1.challenge}&code_challenge_method=S256&state=s1`,
+      );
+      expect(openRedirectCheck.status).toBe(400);
+
+      const noCsrfDecision = await ownerAgent.post('/api/oauth/authorize/decision').send({
+        decision: 'approve',
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        code_challenge: pkce1.challenge,
+        code_challenge_method: 'S256',
+        state: 's1',
+      });
+      expect(noCsrfDecision.status).toBe(403);
+
+      const freeApprove = await freeAgent
+        .post('/api/oauth/authorize/decision')
+        .set(CSRF)
+        .send({
+          decision: 'approve',
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: 'code',
+          code_challenge: pkce1.challenge,
+          code_challenge_method: 'S256',
+          state: 's1',
+        });
+      expect(freeApprove.status).toBe(403);
+      expect(freeApprove.body.code).toBe('PRO_REQUIRED');
+
+      const freeDeny = await freeAgent
+        .post('/api/oauth/authorize/decision')
+        .set(CSRF)
+        .send({
+          decision: 'deny',
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: 'code',
+          code_challenge: pkce1.challenge,
+          code_challenge_method: 'S256',
+          state: 'deny-state',
+        });
+      expect(freeDeny.status).toBe(200);
+      expect(freeDeny.body.redirectTo).toContain('error=access_denied');
+      expect(freeDeny.body.redirectTo).toContain('state=deny-state');
+
+      // 4. Owner inspects consent info & approves -> receives authorization code
+      const infoRes = await ownerAgent
+        .get(
+          `/api/oauth/authorize/info?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&code_challenge=${pkce1.challenge}&code_challenge_method=S256&state=state-xyz&resource=${encodeURIComponent('https://flowboard.example.test/api/mcp')}`,
+        )
+        .set(HOST);
+      expect(infoRes.status).toBe(200);
+      expect(infoRes.body.client.clientName).toBe('Claude.ai Web');
+      expect(infoRes.body.client.redirectHost).toBe('claude.ai');
+
+      // Foreign RFC 8707 resource indicator must be rejected
+      const foreignResource = await ownerAgent
+        .get(
+          `/api/oauth/authorize/info?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&code_challenge=${pkce1.challenge}&code_challenge_method=S256&state=state-xyz&resource=${encodeURIComponent('https://evil.example.com/api/mcp')}`,
+        )
+        .set(HOST);
+      expect(foreignResource.status).toBe(400);
+
+      const approve1 = await ownerAgent
+        .post('/api/oauth/authorize/decision')
+        .set(HOST)
+        .set(CSRF)
+        .send({
+          decision: 'approve',
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: 'code',
+          code_challenge: pkce1.challenge,
+          code_challenge_method: 'S256',
+          state: 'state-xyz',
+          resource: 'https://flowboard.example.test/api/mcp',
+        });
+      expect(approve1.status).toBe(200);
+      const callbackUrl1 = new URL(approve1.body.redirectTo);
+      expect(callbackUrl1.searchParams.get('state')).toBe('state-xyz');
+      const authCode1 = callbackUrl1.searchParams.get('code') || '';
+      expect(authCode1).toMatch(/^fbc_/);
+
+      // 5. Token exchange via application/x-www-form-urlencoded: wrong PKCE fails, valid PKCE succeeds, replay revokes!
+      const badPkceToken = await request(app)
+        .post('/api/oauth/token')
+        .set(HOST)
+        .set('Content-Type', 'application/x-www-form-urlencoded')
+        .send(
+          new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: clientId,
+            code: authCode1,
+            redirect_uri: redirectUri,
+            code_verifier: 'wrong_verifier_value_that_is_at_least_43_characters_long_1234',
+          }).toString(),
+        );
+      expect(badPkceToken.status).toBe(400);
+      expect(badPkceToken.body.error).toBe('invalid_grant');
+
+      const tokenRes1 = await request(app)
+        .post('/api/oauth/token')
+        .set(HOST)
+        .set('Content-Type', 'application/x-www-form-urlencoded')
+        .send(
+          new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: clientId,
+            code: authCode1,
+            redirect_uri: redirectUri,
+            code_verifier: pkce1.verifier,
+            resource: 'https://flowboard.example.test/api/mcp',
+          }).toString(),
+        );
+      expect(tokenRes1.status).toBe(200);
+      expect(tokenRes1.body.access_token).toMatch(/^fbo_/);
+      expect(tokenRes1.body.refresh_token).toMatch(/^fbr_/);
+      expect(tokenRes1.body.token_type).toBe('Bearer');
+
+      // Replaying authCode1 must fail AND revoke the compromised token pair
+      const replayRes = await request(app)
+        .post('/api/oauth/token')
+        .set(HOST)
+        .set('Content-Type', 'application/x-www-form-urlencoded')
+        .send(
+          new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: clientId,
+            code: authCode1,
+            redirect_uri: redirectUri,
+            code_verifier: pkce1.verifier,
+          }).toString(),
+        );
+      expect(replayRes.status).toBe(400);
+      const revokedByReplay = await request(app)
+        .post('/api/mcp')
+        .set(HOST)
+        .set('Authorization', `Bearer ${tokenRes1.body.access_token}`)
+        .send({ jsonrpc: '2.0', id: 1, method: 'ping' });
+      expect(revokedByReplay.status).toBe(401);
+
+      // 6. Clean authorization -> use OAuth Bearer token on MCP -> generate diagram -> refresh rotation -> revoke
+      const pkce2 = makePkce();
+      const approve2 = await ownerAgent
+        .post('/api/oauth/authorize/decision')
+        .set(HOST)
+        .set(CSRF)
+        .send({
+          decision: 'approve',
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: 'code',
+          code_challenge: pkce2.challenge,
+          code_challenge_method: 'S256',
+          state: 's2',
+          resource: 'https://flowboard.example.test/api/mcp',
+        });
+      const authCode2 = new URL(approve2.body.redirectTo).searchParams.get('code') || '';
+
+      const tokenRes2 = await request(app)
+        .post('/api/oauth/token')
+        .set(HOST)
+        .set('Content-Type', 'application/x-www-form-urlencoded')
+        .send(
+          new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: clientId,
+            code: authCode2,
+            redirect_uri: redirectUri,
+            code_verifier: pkce2.verifier,
+          }).toString(),
+        );
+      expect(tokenRes2.status).toBe(200);
+      const accessToken = tokenRes2.body.access_token;
+      const refreshToken = tokenRes2.body.refresh_token;
+
+      // Call MCP generate_diagram using OAuth Bearer token
+      const mcpGen = await request(app)
+        .post('/api/mcp')
+        .set(HOST)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          jsonrpc: '2.0',
+          id: 10,
+          method: 'tools/call',
+          params: {
+            name: 'generate_diagram',
+            arguments: {
+              title: 'Diagram via OAuth MCP',
+              kind: 'flowchart',
+              code: '@startuml\nstart\n:Login OAuth;\nstop\n@enduml',
+            },
+          },
+        });
+      expect(mcpGen.status).toBe(200);
+      expect(mcpGen.body.result.structuredContent.storage).toBe('user_workspace');
+      expect(mcpGen.body.result.structuredContent.title).toBe('Diagram via OAuth MCP');
+
+      // Refresh token rotation
+      const refreshRes = await request(app)
+        .post('/api/oauth/token')
+        .set(HOST)
+        .set('Content-Type', 'application/x-www-form-urlencoded')
+        .send(
+          new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: clientId,
+            refresh_token: refreshToken,
+          }).toString(),
+        );
+      expect(refreshRes.status).toBe(200);
+      expect(refreshRes.body.access_token).toMatch(/^fbo_/);
+      expect(refreshRes.body.access_token).not.toBe(accessToken);
+      expect(refreshRes.body.refresh_token).not.toBe(refreshToken);
+
+      // Old access & refresh tokens are immediately invalid after rotation
+      const oldTokenCheck = await request(app)
+        .post('/api/mcp')
+        .set(HOST)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ jsonrpc: '2.0', id: 11, method: 'ping' });
+      expect(oldTokenCheck.status).toBe(401);
+
+      // New rotated access token works on MCP
+      const newTokenCheck = await request(app)
+        .post('/api/mcp')
+        .set(HOST)
+        .set('Authorization', `Bearer ${refreshRes.body.access_token}`)
+        .send({ jsonrpc: '2.0', id: 12, method: 'ping' });
+      expect(newTokenCheck.status).toBe(200);
+
+      // Connected apps list & anti-IDOR revocation
+      const connList = await ownerAgent.get('/api/oauth/connections');
+      expect(connList.status).toBe(200);
+      expect(connList.body.connections).toHaveLength(1);
+      expect(connList.body.connections[0].clientName).toBe('Claude.ai Web');
+      const connId = connList.body.connections[0].id;
+
+      const idorRevokeConn = await proAgentB.delete(`/api/oauth/connections/${connId}`).set(CSRF);
+      expect(idorRevokeConn.status).toBe(403);
+
+      const ownerRevokeConn = await ownerAgent.delete(`/api/oauth/connections/${connId}`).set(CSRF);
+      expect(ownerRevokeConn.status).toBe(200);
+
+      const afterConnRevoke = await request(app)
+        .post('/api/mcp')
+        .set(HOST)
+        .set('Authorization', `Bearer ${refreshRes.body.access_token}`)
+        .send({ jsonrpc: '2.0', id: 13, method: 'ping' });
+      expect(afterConnRevoke.status).toBe(401);
     } finally {
       if (prevOwnerEmails === undefined) {
         delete process.env.OWNER_EMAILS;

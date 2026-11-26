@@ -37,10 +37,12 @@ declare module 'node:crypto' {
   export function createHash(alg: string): {
     update(data: string): { digest(enc: string): string };
   };
+  export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
   const cryptoDefault: {
     randomUUID: typeof randomUUID;
     randomBytes: typeof randomBytes;
     createHash: typeof createHash;
+    timingSafeEqual: typeof timingSafeEqual;
   };
   export default cryptoDefault;
 }
@@ -73,6 +75,7 @@ declare module 'express' {
     protocol: string;
     ip?: string;
     body: unknown;
+    query: Record<string, unknown>;
     params: Record<string, string>;
     cookies?: Record<string, unknown>;
     user?: {
@@ -89,6 +92,7 @@ declare module 'express' {
     status(code: number): Response;
     json(body: unknown): Response;
     end(): Response;
+    redirect(statusOrUrl: number | string, url?: string): void;
     sendFile(filePath: string): void;
     setHeader(name: string, value: string): void;
     cookie(name: string, value: string, options?: CookieOptions): Response;
@@ -115,6 +119,7 @@ declare module 'express' {
   namespace express {
     function Router(): Router;
     function json(options?: { limit?: string }): RequestHandler;
+    function urlencoded(options?: { extended?: boolean; limit?: string }): RequestHandler;
     function static(root: string): RequestHandler;
   }
   export default express;

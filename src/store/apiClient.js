@@ -89,4 +89,22 @@ export const apiClient = {
       body: JSON.stringify(data),
     });
   },
+  getOAuthAuthorizeInfo(search) {
+    const query = search.startsWith('?') ? search : `?${search}`;
+    return requestJson(`/api/oauth/authorize/info${query}`, { method: 'GET' });
+  },
+  submitOAuthDecision(data) {
+    return requestJson('/api/oauth/authorize/decision', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  listOAuthConnections() {
+    return requestJson('/api/oauth/connections', { method: 'GET' });
+  },
+  revokeOAuthConnection(id) {
+    return requestJson(`/api/oauth/connections/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
 };

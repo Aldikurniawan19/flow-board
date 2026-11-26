@@ -51,6 +51,50 @@ const SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS oauth_clients (
+    client_id TEXT PRIMARY KEY,
+    client_secret_hash TEXT,
+    client_name TEXT NOT NULL,
+    redirect_uris_json TEXT NOT NULL,
+    token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
+    grant_types_json TEXT NOT NULL,
+    response_types_json TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'mcp:tools',
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS oauth_auth_codes (
+    code_hash TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    resource TEXT,
+    code_challenge TEXT NOT NULL,
+    code_challenge_method TEXT NOT NULL DEFAULT 'S256',
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_oauth_auth_codes_expires ON oauth_auth_codes(expires_at)`,
+  `CREATE TABLE IF NOT EXISTS oauth_tokens (
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    access_token_hash TEXT NOT NULL UNIQUE,
+    refresh_token_hash TEXT UNIQUE,
+    scope TEXT NOT NULL,
+    resource TEXT,
+    expires_at TEXT NOT NULL,
+    refresh_expires_at TEXT,
+    revoked_at TEXT,
+    last_used_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user_id ON oauth_tokens(user_id)`,
 ];
 
 /**

@@ -8,6 +8,7 @@ import { createApiKeysRouter } from './routes/apiKeys.js';
 import { createPublicDraftsRouter } from './routes/publicDrafts.js';
 import { buildOpenApiSpec, createExternalApiRouter } from './routes/externalApi.js';
 import { createMcpRouter } from './routes/mcp.js';
+import { createOAuthRouter, createOAuthWellKnownRouter } from './routes/oauth.js';
 import { resolveBaseUrl } from './services/diagramService.js';
 import {
   applyExternalApiCors,
@@ -27,6 +28,9 @@ export function createApp({ db, enableRateLimit = true, serveStatic = true }) {
   app.use(applySecurityHeaders);
   app.use(cookieParser());
   app.use(express.json({ limit: '6mb' }));
+  app.use(express.urlencoded({ extended: false, limit: '256kb' }));
+
+  app.use('/.well-known', createOAuthWellKnownRouter());
 
   app.get('/api/health', async (_req, res, next) => {
     try {
@@ -48,12 +52,13 @@ export function createApp({ db, enableRateLimit = true, serveStatic = true }) {
   app.use('/api/public', createPublicDraftsRouter(db, { enableRateLimit }));
   app.use('/api/v1', createExternalApiRouter(db, { enableRateLimit }));
   app.use('/api/mcp', createMcpRouter(db, { enableRateLimit }));
+  app.use('/api/oauth', createOAuthRouter(db, { enableRateLimit }));
 
   if (serveStatic) {
     const distDir = path.resolve(process.cwd(), 'dist');
     if (fs.existsSync(distDir)) {
       app.use(express.static(distDir));
-      app.get(/^(?!\/api\/).*/, (_req, res) => {
+      app.get(/^(?!\/(?:api|\.well-known)\/).*/, (_req, res) => {
         res.sendFile(path.join(distDir, 'index.html'));
       });
     }

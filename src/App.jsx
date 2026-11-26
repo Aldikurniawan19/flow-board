@@ -7,6 +7,7 @@ import { ExportImportModal } from './components/ExportImportModal.jsx';
 import { FeedbackBanner } from './components/FeedbackBanner.jsx';
 import { HeaderBar } from './components/HeaderBar.jsx';
 import { InspectorPanel } from './components/InspectorPanel.jsx';
+import { OAuthConsentScreen } from './components/OAuthConsentScreen.jsx';
 import { PlantTextModal } from './components/PlantTextModal.jsx';
 import { ShapeLibrarySidebar } from './components/ShapeLibrarySidebar.jsx';
 import { TopToolbar } from './components/TopToolbar.jsx';
@@ -117,12 +118,27 @@ export function App() {
     return () => window.removeEventListener('keydown', handleAppShortcuts);
   }, [authStatus, guestPreviewMode, exportOpen, plantTextOpen, aiModalOpen]);
 
+  const isOAuthAuthorizeRoute =
+    typeof window !== 'undefined' && window.location.pathname === '/oauth/authorize';
+
   if (authStatus === 'loading') {
     return (
       <main className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center gap-3 p-4">
         <Loader2 className="h-7 w-7 animate-spin text-[#1D4ED8]" strokeWidth={1.75} aria-hidden="true" />
         <p className="text-sm font-medium text-[#475569]">Memeriksa sesi akun...</p>
       </main>
+    );
+  }
+
+  if (isOAuthAuthorizeRoute) {
+    if (authStatus !== 'authenticated') {
+      return <AuthScreen oauthNotice />;
+    }
+    return (
+      <>
+        <OAuthConsentScreen onOpenUpgrade={() => setAiModalOpen(true)} />
+        <AiIntegrationModal open={aiModalOpen} onClose={() => setAiModalOpen(false)} />
+      </>
     );
   }
 

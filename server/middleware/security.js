@@ -16,7 +16,10 @@ export function requireCsrfHeader(req, res, next) {
     path === '/mcp' ||
     path.startsWith('/mcp/') ||
     path.startsWith('/v1/') ||
-    path.startsWith('/public/')
+    path.startsWith('/public/') ||
+    path === '/oauth/register' ||
+    path === '/oauth/token' ||
+    path === '/oauth/revoke'
   ) {
     return next();
   }
@@ -39,7 +42,11 @@ export function requireCsrfHeader(req, res, next) {
 export function applyExternalApiCors(req, res, next) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version',
+  );
+  res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate, Mcp-Session-Id');
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
