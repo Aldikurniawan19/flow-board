@@ -1373,5 +1373,11 @@ p "1" -- "N" t : "MELAKUKAN"
     expect(addedPreset.type).toBe('connector');
     expect(addedPreset.startMarker).toBe('crow_one_only');
     expect(addedPreset.endMarker).toBe('crow_zero_many');
+
+    // 9. Switching to Eraser tool applies the custom eraser SVG cursor on the canvas
+    act(() => {
+      useBoardStore.getState().setActiveTool('eraser');
+    });
+    expect(canvas.style.cursor).toContain('data:image/svg+xml');
   });
 });

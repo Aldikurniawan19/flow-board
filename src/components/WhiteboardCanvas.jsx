@@ -49,6 +49,16 @@ const TOOL_SHORTCUTS = {
   s: 'sticky_note',
 };
 
+const ERASER_CURSOR_SVG = encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">' +
+    '<path d="M14.7 3.3a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8l-9.9 9.9a2 2 0 0 1-1.4.6H5.8a1.5 1.5 0 0 1-1.1-.4l-1.4-1.4a2 2 0 0 1 0-2.8L14.7 3.3Z" fill="#FDA4AF" stroke="#0F172A" stroke-width="1.6" stroke-linejoin="round"/>' +
+    '<path d="M9.6 8.4l6 6-4.8 4.8a2 2 0 0 1-1.4.6H5.8a1.5 1.5 0 0 1-1.1-.4l-1.4-1.4a2 2 0 0 1 0-2.8l6.3-6.8Z" fill="#FFFFFF" stroke="#0F172A" stroke-width="1.6" stroke-linejoin="round"/>' +
+    '<line x1="3" y1="21" x2="17" y2="21" stroke="#64748B" stroke-width="1.6" stroke-linecap="round"/>' +
+    '</svg>',
+);
+
+const ERASER_CURSOR = `url("data:image/svg+xml,${ERASER_CURSOR_SVG}") 5 19, cell`;
+
 export function WhiteboardCanvas() {
   const canvasRef = useRef(/** @type {HTMLCanvasElement | null} */ (null));
   const interactionRef = useRef(/** @type {any} */ (null));
@@ -982,7 +992,7 @@ export function WhiteboardCanvas() {
           if (hoveredShapeId) setHoveredShapeId(null);
           if (hoveredQuickConnect) setHoveredQuickConnect(null);
           if (hoveredLabelId) setHoveredLabelId(null);
-          setCursorStyle('crosshair');
+          setCursorStyle(store.activeTool === 'eraser' ? ERASER_CURSOR : 'crosshair');
         }
       }
       return;
@@ -1381,7 +1391,13 @@ export function WhiteboardCanvas() {
     }
 
     if (interaction.mode === 'pan') {
-      setCursorStyle(store.activeTool === 'hand' ? 'grab' : 'default');
+      setCursorStyle(
+        store.activeTool === 'hand'
+          ? 'grab'
+          : store.activeTool === 'eraser'
+            ? ERASER_CURSOR
+            : 'default',
+      );
       return;
     }
 
@@ -1822,6 +1838,11 @@ export function WhiteboardCanvas() {
     }
   }
 
+  const resolvedCursor =
+    activeTool === 'eraser' && cursorStyle !== 'grab' && cursorStyle !== 'grabbing'
+      ? ERASER_CURSOR
+      : cursorStyle;
+
   return (
     <div className="relative flex-1 h-full overflow-hidden bg-[#F8FAFC]">
       <canvas
@@ -1849,7 +1870,7 @@ export function WhiteboardCanvas() {
           e.dataTransfer.dropEffect = 'copy';
         }}
         onDrop={handleDrop}
-        style={{ cursor: cursorStyle, touchAction: 'none' }}
+        style={{ cursor: resolvedCursor, touchAction: 'none' }}
         className="block w-full h-full"
       />
 
