@@ -95,12 +95,123 @@ function simplifyOrthoPath(pts) {
 }
 
 /**
+ * Extract numeric process ordering key (e.g. "1.0", "2.1", "3.0") if present in `code` or `text`.
+ * @param {import('../types/schema.js').BoardElement} el
+ * @returns {number | null}
+ */
+function parseProcessOrderNumber(el) {
+  const src = `${el.code || ''} ${el.text || ''}`.trim();
+  const match = src.match(/^(\d+)(?:\.(\d+))?/);
+  if (!match) return null;
+  const major = Number(match[1]);
+  const minor = match[2] ? Number(match[2]) / 100 : 0;
+  return Number.isFinite(major) ? major + minor : null;
+}
+
+/**
+ * Count exact bipartite crossings between an ordered side column (`sideNodes`)
+ * and an ordered center column (`centerNodes`) given edges connecting them.
+ * @param {string[]} sideOrder
+ * @param {Map<string, number>} centerRank
+ * @param {Array<{ sideId: string, centerId: string }>} pairs
+ * @returns {{ crossings: number, span: number }}
+ */
+function evaluateBipartiteOrder(sideOrder, centerRank, pairs) {
+  const sideRank = new Map(sideOrder.map((id, idx) => [id, idx]));
+  /** @type {Array<{ s: number, c: number }>} */
+  const edges = [];
+  let span = 0;
+  for (const p of pairs) {
+    const s = sideRank.get(p.sideId);
+    const c = centerRank.get(p.centerId);
+    if (s === undefined || c === undefined) continue;
+    edges.push({ s, c });
+    span += Math.abs(s - c);
+  }
+  let crossings = 0;
+  for (let i = 0; i < edges.length; i += 1) {
+    for (let j = i + 1; j < edges.length; j += 1) {
+      const ds = edges[i].s - edges[j].s;
+      const dc = edges[i].c - edges[j].c;
+      if (ds * dc < 0) crossings += 1;
+    }
+  }
+  return { crossings, span };
+}
+
+/**
+ * Reorder a side column (`entities` or `stores`) by barycenter + 2-opt crossing minimization
+ * relative to the fixed center process spine so corridor wires have minimal crossings.
+ * @param {import('../types/schema.js').BoardElement[]} sideNodes
+ * @param {Map<string, number>} centerRank
+ * @param {Array<{ sideId: string, centerId: string }>} pairs
+ * @returns {import('../types/schema.js').BoardElement[]}
+ */
+function sortSideColumnForMinCrossings(sideNodes, centerRank, pairs) {
+  if (sideNodes.length <= 1) return sideNodes;
+  const byId = new Map(sideNodes.map((n) => [n.id, n]));
+  const declIdx = new Map(sideNodes.map((n, idx) => [n.id, idx]));
+
+  // Initial barycenter sort (average connected process rank)
+  const barycenter = new Map();
+  for (const n of sideNodes) {
+    const ranks = pairs
+      .filter((p) => p.sideId === n.id)
+      .map((p) => centerRank.get(p.centerId))
+      .filter(/** @type {(v: number | undefined) => v is number} */ ((v) => v !== undefined));
+    const avg =
+      ranks.length > 0
+        ? ranks.reduce((acc, r) => acc + r, 0) / ranks.length
+        : (declIdx.get(n.id) || 0);
+    barycenter.set(n.id, avg);
+  }
+
+  let order = [...sideNodes]
+    .sort((a, b) => {
+      const diff = (barycenter.get(a.id) || 0) - (barycenter.get(b.id) || 0);
+      if (Math.abs(diff) > 0.01) return diff;
+      return (declIdx.get(a.id) || 0) - (declIdx.get(b.id) || 0);
+    })
+    .map((n) => n.id);
+
+  // Hill-climbing swap + re-insertion search until no further crossing reduction is possible
+  let best = evaluateBipartiteOrder(order, centerRank, pairs);
+  let improved = true;
+  let guard = 0;
+  while (improved && guard < 20) {
+    improved = false;
+    guard += 1;
+    for (let i = 0; i < order.length; i += 1) {
+      for (let j = i + 1; j < order.length; j += 1) {
+        const swapped = order.slice();
+        const tmp = swapped[i];
+        swapped[i] = swapped[j];
+        swapped[j] = tmp;
+        const evalSwap = evaluateBipartiteOrder(swapped, centerRank, pairs);
+        if (
+          evalSwap.crossings < best.crossings ||
+          (evalSwap.crossings === best.crossings && evalSwap.span < best.span)
+        ) {
+          order = swapped;
+          best = evalSwap;
+          improved = true;
+        }
+      }
+    }
+  }
+
+  return order
+    .map((id) => byId.get(id))
+    .filter(/** @type {(v: import('../types/schema.js').BoardElement | undefined) => v is import('../types/schema.js').BoardElement} */ ((v) => Boolean(v)));
+}
+
+/**
  * Semantic 3-Column Corridor DFD Layout:
- * - Column 1 (Left): External Entities (in declaration order)
- * - Left Corridor (wide 360px multi-lane highway): Entity <-> Process flows
- * - Column 2 (Center): Processes (vertical stack with clean inter-process arrows)
- * - Right Corridor (wide 360px multi-lane highway): Process <-> Data Store flows
- * - Column 3 (Right): Data Stores (in declaration order)
+ * - Column 1 (Left): External Entities (sorted by barycenter + 2-opt crossing minimization)
+ * - Left Corridor (wide multi-lane highway): Entity <-> Process flows
+ * - Column 2 (Center): Processes (ordered by process number 1.0..N or topological flow)
+ * - Right Corridor (wide multi-lane highway): Process <-> Data Store flows
+ * - Column 3 (Right): Data Stores (sorted by barycenter + 2-opt crossing minimization)
  *
  * Completely separates Entity<->Process flows from Process<->DataStore flows so the
  * two corridors NEVER cross each other, matching textbook DFD Level 1 layouts.
@@ -109,25 +220,45 @@ function simplifyOrthoPath(pts) {
  * @param {import('../types/schema.js').BoardElement[]} connectors
  */
 function assignSemanticDfdPositions(nodes, connectors) {
-  const entities = nodes.filter((n) => n.type === 'dfd_gs_entity' || n.type === 'dfd_yd_entity');
-  const processes = nodes.filter((n) => n.type === 'dfd_gs_process' || n.type === 'dfd_yd_process');
-  const stores = nodes.filter((n) => n.type === 'dfd_gs_datastore' || n.type === 'dfd_yd_datastore');
+  const rawEntities = nodes.filter((n) => n.type === 'dfd_gs_entity' || n.type === 'dfd_yd_entity');
+  const rawProcesses = nodes.filter(
+    (n) => n.type === 'dfd_gs_process' || n.type === 'dfd_yd_process',
+  );
+  const rawStores = nodes.filter(
+    (n) => n.type === 'dfd_gs_datastore' || n.type === 'dfd_yd_datastore',
+  );
   const others = nodes.filter(
-    (n) => !entities.includes(n) && !processes.includes(n) && !stores.includes(n),
+    (n) => !rawEntities.includes(n) && !rawProcesses.includes(n) && !rawStores.includes(n),
   );
 
-  const entityIds = new Set(entities.map((e) => e.id));
-  const storeIds = new Set(stores.map((s) => s.id));
-  const centerNodes = [...processes, ...others];
-  const centerIds = new Set(centerNodes.map((p) => p.id));
+  // Order center processes by explicit process number (1.0, 2.0, ...) when available
+  const procDeclIdx = new Map(rawProcesses.map((p, idx) => [p.id, idx]));
+  const orderedProcesses = [...rawProcesses].sort((a, b) => {
+    const na = parseProcessOrderNumber(a);
+    const nb = parseProcessOrderNumber(b);
+    if (na !== null && nb !== null && na !== nb) return na - nb;
+    if (na !== null && nb === null) return -1;
+    if (na === null && nb !== null) return 1;
+    return (procDeclIdx.get(a.id) || 0) - (procDeclIdx.get(b.id) || 0);
+  });
 
-  // Count corridor density & per-node side degree so ports & lanes always have generous breathing room
+  const centerNodes = [...orderedProcesses, ...others];
+  const entityIds = new Set(rawEntities.map((e) => e.id));
+  const storeIds = new Set(rawStores.map((s) => s.id));
+  const centerIds = new Set(centerNodes.map((p) => p.id));
+  const centerRank = new Map(centerNodes.map((p, idx) => [p.id, idx]));
+
+  // Count corridor density, per-node side degree, and bipartite pairs for crossing-free column ordering
   let leftCorridorFlows = 0;
   let rightCorridorFlows = 0;
   /** @type {Map<string, number>} */
   const leftDeg = new Map();
   /** @type {Map<string, number>} */
   const rightDeg = new Map();
+  /** @type {Array<{ sideId: string, centerId: string }>} */
+  const entityPairs = [];
+  /** @type {Array<{ sideId: string, centerId: string }>} */
+  const storePairs = [];
 
   for (const c of connectors) {
     const s = c.startBinding?.elementId;
@@ -139,14 +270,19 @@ function assignSemanticDfdPositions(nodes, connectors) {
       const prc = centerIds.has(s) ? s : t;
       rightDeg.set(ent, (rightDeg.get(ent) || 0) + 1);
       leftDeg.set(prc, (leftDeg.get(prc) || 0) + 1);
+      entityPairs.push({ sideId: ent, centerId: prc });
     } else if ((centerIds.has(s) && storeIds.has(t)) || (storeIds.has(s) && centerIds.has(t))) {
       rightCorridorFlows += 1;
       const prc = centerIds.has(s) ? s : t;
       const st = storeIds.has(s) ? s : t;
       rightDeg.set(prc, (rightDeg.get(prc) || 0) + 1);
       leftDeg.set(st, (leftDeg.get(st) || 0) + 1);
+      storePairs.push({ sideId: st, centerId: prc });
     }
   }
+
+  const entities = sortSideColumnForMinCrossings(rawEntities, centerRank, entityPairs);
+  const stores = sortSideColumnForMinCrossings(rawStores, centerRank, storePairs);
 
   // Scale node height for high-degree nodes so parallel corridor wires & labels have ample vertical space
   for (const node of [...entities, ...centerNodes, ...stores]) {
@@ -173,47 +309,91 @@ function assignSemanticDfdPositions(nodes, connectors) {
   const maxProcW = centerNodes.reduce((m, p) => Math.max(m, p.width), 184);
 
   const leftCorridor =
-    entities.length > 0 ? Math.max(420, Math.min(620, 340 + leftCorridorFlows * 11)) : 0;
+    entities.length > 0 ? Math.max(420, Math.min(640, 340 + leftCorridorFlows * 12)) : 0;
   const rightCorridor =
-    stores.length > 0 ? Math.max(420, Math.min(620, 340 + rightCorridorFlows * 11)) : 0;
+    stores.length > 0 ? Math.max(420, Math.min(640, 340 + rightCorridorFlows * 12)) : 0;
   const col2X = entities.length > 0 ? col1X + maxEntityW + leftCorridor : 120;
   const col3X = col2X + maxProcW + rightCorridor;
 
   const topY = 80;
 
-  // Stack center processes cleanly in declaration order
+  // Stack center processes cleanly in logical order
   let procCursorY = topY;
+  /** @type {Map<string, number>} */
+  const centerYMap = new Map();
   for (const proc of centerNodes) {
     proc.x = Math.round(col2X + (maxProcW - proc.width) / 2);
     proc.y = Math.round(procCursorY);
+    centerYMap.set(proc.id, proc.y + proc.height / 2);
     procCursorY += proc.height + procGap;
   }
   const totalHeight = Math.max(320, procCursorY - topY - procGap);
 
   /**
-   * Distribute a side column evenly across totalHeight while preserving declaration order.
+   * Align each node in a side column close to the vertical barycenter of its connected processes,
+   * while enforcing clean non-overlapping vertical spacing.
    * @param {import('../types/schema.js').BoardElement[]} list
    * @param {number} x
+   * @param {Array<{ sideId: string, centerId: string }>} pairs
    */
-  function placeDistributedColumn(list, x) {
+  function placeAlignedSideColumn(list, x, pairs) {
     if (list.length === 0) return;
     if (list.length === 1) {
+      const targetYs = pairs
+        .filter((p) => p.sideId === list[0].id)
+        .map((p) => centerYMap.get(p.centerId))
+        .filter(/** @type {(v: number | undefined) => v is number} */ ((v) => v !== undefined));
+      const idealCenterY =
+        targetYs.length > 0
+          ? targetYs.reduce((a, b) => a + b, 0) / targetYs.length
+          : topY + totalHeight / 2;
       list[0].x = Math.round(x);
-      list[0].y = Math.round(topY + (totalHeight - list[0].height) / 2);
+      list[0].y = Math.round(Math.max(topY, idealCenterY - list[0].height / 2));
       return;
     }
-    const sumH = list.reduce((acc, el) => acc + el.height, 0);
-    const gap = Math.max(76, (totalHeight - sumH) / (list.length - 1));
-    let cy = topY;
-    for (const item of list) {
-      item.x = Math.round(x);
-      item.y = Math.round(cy);
-      cy += item.height + gap;
+
+    const minGap = 68;
+    const ideals = list.map((item, idx) => {
+      const targetYs = pairs
+        .filter((p) => p.sideId === item.id)
+        .map((p) => centerYMap.get(p.centerId))
+        .filter(/** @type {(v: number | undefined) => v is number} */ ((v) => v !== undefined));
+      if (targetYs.length > 0) {
+        const avg = targetYs.reduce((a, b) => a + b, 0) / targetYs.length;
+        return Math.max(topY, Math.min(topY + totalHeight - item.height, avg - item.height / 2));
+      }
+      return topY + (idx / Math.max(1, list.length - 1)) * Math.max(0, totalHeight - item.height);
+    });
+
+    // Forward pass: push down overlapping items to enforce minGap
+    const ys = ideals.slice();
+    for (let i = 1; i < list.length; i += 1) {
+      const minY = ys[i - 1] + list[i - 1].height + minGap;
+      if (ys[i] < minY) ys[i] = minY;
+    }
+    // Backward pull-up if bottom overflowed totalHeight + 80
+    const bottomLimit = topY + totalHeight;
+    const lastBottom = ys[list.length - 1] + list[list.length - 1].height;
+    if (lastBottom > bottomLimit + 40) {
+      ys[list.length - 1] = bottomLimit - list[list.length - 1].height;
+      for (let i = list.length - 2; i >= 0; i -= 1) {
+        const maxY = ys[i + 1] - minGap - list[i].height;
+        if (ys[i] > maxY) ys[i] = maxY;
+      }
+      if (ys[0] < topY) {
+        const shift = topY - ys[0];
+        for (let i = 0; i < ys.length; i += 1) ys[i] += shift;
+      }
+    }
+
+    for (let i = 0; i < list.length; i += 1) {
+      list[i].x = Math.round(x);
+      list[i].y = Math.round(ys[i]);
     }
   }
 
-  placeDistributedColumn(entities, col1X);
-  placeDistributedColumn(stores, col3X);
+  placeAlignedSideColumn(entities, col1X, entityPairs);
+  placeAlignedSideColumn(stores, col3X, storePairs);
 }
 
 /**
@@ -810,7 +990,8 @@ function distributeConnectorPorts(connectors, nodeById, direction, dirHints) {
    *   connector: import('../types/schema.js').BoardElement,
    *   which: 'start' | 'end',
    *   side: import('../types/schema.js').PortSide,
-   *   sortKey: number
+   *   sortKey: number,
+   *   secondaryKey: number
    * }} PortSlot
    */
   /** @type {Map<string, PortSlot[]>} */
@@ -842,17 +1023,35 @@ function distributeConnectorPorts(connectors, nodeById, direction, dirHints) {
     if (!groups.has(startKey)) groups.set(startKey, []);
     if (!groups.has(endKey)) groups.set(endKey, []);
 
+    /**
+     * Compute secondary nested-L-bend tie-breaker so multiple wires fanning out of a single side
+     * toward targets in the same column/row nest cleanly without crossing each other.
+     * @param {import('../types/schema.js').PortSide} side
+     * @param {number} ox
+     * @param {number} oy
+     * @param {number} tx
+     * @param {number} ty
+     */
+    const computeSecondary = (side, ox, oy, tx, ty) => {
+      if (side === 'bottom') return tx < ox ? ty : -ty;
+      if (side === 'top') return tx < ox ? -ty : ty;
+      if (side === 'right') return ty < oy ? -tx : tx;
+      return ty < oy ? tx : -tx;
+    };
+
     groups.get(startKey)?.push({
       connector: c,
       which: 'start',
       side: startSide,
       sortKey: startSide === 'left' || startSide === 'right' ? dCy : dCx,
+      secondaryKey: computeSecondary(startSide, sCx, sCy, dCx, dCy),
     });
     groups.get(endKey)?.push({
       connector: c,
       which: 'end',
       side: endSide,
       sortKey: endSide === 'left' || endSide === 'right' ? sCy : sCx,
+      secondaryKey: computeSecondary(endSide, dCx, dCy, sCx, sCy),
     });
   }
 
@@ -867,9 +1066,11 @@ function distributeConnectorPorts(connectors, nodeById, direction, dirHints) {
   ]);
 
   for (const [groupKey, slots] of groups.entries()) {
-    // Deterministic tie-break by connector.id ensures bidirectional pairs (A->B and B->A)
-    // occupy matching vertical positions on both endpoints and NEVER cross each other!
+    // Sort by primary target axis, then nested-L-bend secondary axis (eliminates fan-out crossings!),
+    // then deterministic connector.id tie-break for bidirectional pairs.
     slots.sort((a, b) => {
+      if (Math.abs(a.sortKey - b.sortKey) > 36) return a.sortKey - b.sortKey;
+      if (Math.abs(a.secondaryKey - b.secondaryKey) > 1) return a.secondaryKey - b.secondaryKey;
       if (Math.abs(a.sortKey - b.sortKey) > 1) return a.sortKey - b.sortKey;
       return a.connector.id.localeCompare(b.connector.id);
     });
@@ -939,6 +1140,30 @@ function distributeConnectorPorts(connectors, nodeById, direction, dirHints) {
           const d = (c.endBinding.ry - 0.5) * 2;
           const h = 0.5 * Math.sqrt(Math.max(0, 1 - d * d));
           c.endBinding.rx = Math.round((eSide === 'left' ? 0.5 - h : 0.5 + h) * 1000) / 1000;
+        }
+      }
+    } else if (
+      ((sSide === 'bottom' && eSide === 'top') || (sSide === 'top' && eSide === 'bottom')) &&
+      sCount === eCount &&
+      sCount <= 2
+    ) {
+      const pS = resolveBindingPoint(src, c.startBinding);
+      const pE = resolveBindingPoint(dst, c.endBinding);
+      const targetX = src.width <= dst.width ? pS.x : pE.x;
+      const clampedS = Math.max(0.14, Math.min(0.86, (targetX - src.x) / Math.max(1, src.width)));
+      const clampedE = Math.max(0.14, Math.min(0.86, (targetX - dst.x) / Math.max(1, dst.width)));
+      if (Math.abs(src.x + clampedS * src.width - (dst.x + clampedE * dst.width)) < 2) {
+        c.startBinding.rx = Math.round(clampedS * 1000) / 1000;
+        c.endBinding.rx = Math.round(clampedE * 1000) / 1000;
+        if (ELLIPSE_PORT_TYPES.has(src.type)) {
+          const d = (c.startBinding.rx - 0.5) * 2;
+          const h = 0.5 * Math.sqrt(Math.max(0, 1 - d * d));
+          c.startBinding.ry = Math.round((sSide === 'top' ? 0.5 - h : 0.5 + h) * 1000) / 1000;
+        }
+        if (ELLIPSE_PORT_TYPES.has(dst.type)) {
+          const d = (c.endBinding.rx - 0.5) * 2;
+          const h = 0.5 * Math.sqrt(Math.max(0, 1 - d * d));
+          c.endBinding.ry = Math.round((eSide === 'top' ? 0.5 - h : 0.5 + h) * 1000) / 1000;
         }
       }
     }
@@ -1137,14 +1362,14 @@ function routeObstacleAvoidingOrtho(
         const syMin = Math.min(seg.a.y, seg.b.y);
         const syMax = Math.max(seg.a.y, seg.b.y);
         if (sx > Math.min(a.x, b.x) + 2 && sx < Math.max(a.x, b.x) - 2 && a.y > syMin + 2 && a.y < syMax - 2) {
-          penalty += 220;
+          penalty += 480;
         }
       } else if (!horiz && segHoriz) {
         const sy = seg.a.y;
         const sxMin = Math.min(seg.a.x, seg.b.x);
         const sxMax = Math.max(seg.a.x, seg.b.x);
         if (sy > Math.min(a.y, b.y) + 2 && sy < Math.max(a.y, b.y) - 2 && a.x > sxMin + 2 && a.x < sxMax - 2) {
-          penalty += 220;
+          penalty += 480;
         }
       }
     }
@@ -1718,9 +1943,84 @@ function routeClearCorridorChannels(connectors, nodeById, obstacles) {
       placedArms.push({ leftY, rightY, laneIdx: chosenLane });
     }
 
+    // Order vertical bus lanes along X using 2-opt crossing minimization so nested descending/ascending
+    // bundles take strictly crossing-free PCB-style tracks (upper descending edge takes farther-right lane, etc.)
+    const totalLanes = lanes.length;
+    const lanePerm = Array.from({ length: totalLanes }, (_, i) => i);
+
+    if (totalLanes > 1) {
+      const edgeMeta = assignments.map(({ edge, laneIdx }) => {
+        const leftY = edge.start.x < edge.end.x ? edge.start.y : edge.end.y;
+        const rightY = edge.start.x < edge.end.x ? edge.end.y : edge.start.y;
+        return {
+          laneIdx,
+          leftY,
+          rightY,
+          yLo: Math.min(leftY, rightY),
+          yHi: Math.max(leftY, rightY),
+        };
+      });
+
+      /** @param {number[]} perm */
+      const countLaneCrossings = (perm) => {
+        const rankOf = new Array(totalLanes);
+        for (let pos = 0; pos < perm.length; pos += 1) {
+          rankOf[perm[pos]] = pos;
+        }
+        let cross = 0;
+        for (let i = 0; i < edgeMeta.length; i += 1) {
+          const a = edgeMeta[i];
+          const rA = rankOf[a.laneIdx];
+          for (let j = i + 1; j < edgeMeta.length; j += 1) {
+            const b = edgeMeta[j];
+            const rB = rankOf[b.laneIdx];
+            if (rA === rB) continue;
+            const leftEdge = rA < rB ? a : b;
+            const rightEdge = rA < rB ? b : a;
+            // Left lane's right-arm crosses right lane's vertical riser?
+            if (leftEdge.rightY > rightEdge.yLo + 1 && leftEdge.rightY < rightEdge.yHi - 1) {
+              cross += 1;
+            }
+            // Right lane's left-arm crosses left lane's vertical riser?
+            if (rightEdge.leftY > leftEdge.yLo + 1 && rightEdge.leftY < leftEdge.yHi - 1) {
+              cross += 1;
+            }
+          }
+        }
+        return cross;
+      };
+
+      let bestCross = countLaneCrossings(lanePerm);
+      let improved = true;
+      let passes = 0;
+      while (improved && passes < 16 && bestCross > 0) {
+        improved = false;
+        passes += 1;
+        for (let i = 0; i < lanePerm.length; i += 1) {
+          for (let j = i + 1; j < lanePerm.length; j += 1) {
+            const tmp = lanePerm[i];
+            lanePerm[i] = lanePerm[j];
+            lanePerm[j] = tmp;
+            const c = countLaneCrossings(lanePerm);
+            if (c < bestCross) {
+              bestCross = c;
+              improved = true;
+            } else {
+              lanePerm[j] = lanePerm[i];
+              lanePerm[i] = tmp;
+            }
+          }
+        }
+      }
+    }
+
+    const laneSlotPos = new Array(totalLanes);
+    for (let pos = 0; pos < lanePerm.length; pos += 1) {
+      laneSlotPos[lanePerm[pos]] = pos;
+    }
+
     // Pack vertical risers into a compact central Manhattan bus (14-18px pitch),
     // leaving two wide vertical-wire-FREE label runways on the left and right sides of the bus!
-    const totalLanes = lanes.length;
     const centerBusX = (safeMinX + safeMaxX) / 2;
     const maxBusW = Math.min(availW * 0.42, Math.max(availW - 220, availW * 0.28));
     const lanePitch =
@@ -1728,7 +2028,8 @@ function routeClearCorridorChannels(connectors, nodeById, obstacles) {
     const busStartX = centerBusX - ((totalLanes - 1) * lanePitch) / 2;
 
     for (const { edge, laneIdx } of assignments) {
-      const laneX = Math.round((busStartX + laneIdx * lanePitch) * 10) / 10;
+      const orderedPos = laneSlotPos[laneIdx] ?? laneIdx;
+      const laneX = Math.round((busStartX + orderedPos * lanePitch) * 10) / 10;
       const path = simplifyOrthoPath([
         edge.start,
         { x: laneX, y: edge.start.y },
@@ -2676,40 +2977,193 @@ function optimizeLayerSwaps(candidate, direction) {
     else groups.push([node.id]);
   }
 
+  let improved = true;
   let attempts = 0;
-  const maxAttempts = 18;
-  for (const group of groups) {
-    if (group.length < 2 || group.length > 7) continue;
-    for (let i = 0; i < group.length - 1 && attempts < maxAttempts; i += 1) {
-      for (let j = i + 1; j < group.length && attempts < maxAttempts; j += 1) {
-        attempts += 1;
-        const trial = bestElements.map((el) => structuredClone(el));
-        const nA = trial.find((el) => el.id === group[i]);
-        const nB = trial.find((el) => el.id === group[j]);
-        if (!nA || !nB) continue;
-
-        // Swap slot centers so differently sized boxes stay centered on their swapped slots
-        const aCx = nA.x + nA.width / 2;
-        const aCy = nA.y + nA.height / 2;
-        const bCx = nB.x + nB.width / 2;
-        const bCy = nB.y + nB.height / 2;
-        nA.x = Math.round(bCx - nA.width / 2);
-        nA.y = Math.round(bCy - nA.height / 2);
-        nB.x = Math.round(aCx - nB.width / 2);
-        nB.y = Math.round(aCy - nB.height / 2);
-
-        const routed = routeConnectorsCleanly(trial, { direction });
-        const trialAudit = auditDiagramConflicts(routed);
-        if (trialAudit.score < bestAudit.score) {
-          bestElements = routed;
-          bestAudit = trialAudit;
-          if (
-            bestAudit.edgeCrossings === 0 &&
-            bestAudit.nodeHits === 0 &&
-            bestAudit.segmentOverlaps === 0
-          ) {
-            return { elements: bestElements, audit: bestAudit };
+  const maxAttempts = 48;
+  while (improved && attempts < maxAttempts) {
+    improved = false;
+    for (const group of groups) {
+      if (group.length < 2 || group.length > 8) continue;
+      for (let i = 0; i < group.length - 1 && attempts < maxAttempts; i += 1) {
+        for (let j = i + 1; j < group.length && attempts < maxAttempts; j += 1) {
+          attempts += 1;
+          const trial = bestElements.map((el) => structuredClone(el));
+          const nA = trial.find((el) => el.id === group[i]);
+          const nB = trial.find((el) => el.id === group[j]);
+          if (!nA || !nB) continue;
+          // Preserve logical 1.0 -> 2.0 -> 3.0 numbering order for explicitly numbered DFD processes
+          if (parseProcessOrderNumber(nA) !== null && parseProcessOrderNumber(nB) !== null) {
+            continue;
           }
+
+          // Swap slot centers so differently sized boxes stay centered on their swapped slots
+          const aCx = nA.x + nA.width / 2;
+          const aCy = nA.y + nA.height / 2;
+          const bCx = nB.x + nB.width / 2;
+          const bCy = nB.y + nB.height / 2;
+          nA.x = Math.round(bCx - nA.width / 2);
+          nA.y = Math.round(bCy - nA.height / 2);
+          nB.x = Math.round(aCx - nB.width / 2);
+          nB.y = Math.round(aCy - nB.height / 2);
+
+          const routed = routeConnectorsCleanly(trial, { direction });
+          const trialAudit = auditDiagramConflicts(routed);
+          if (trialAudit.score < bestAudit.score) {
+            bestElements = routed;
+            bestAudit = trialAudit;
+            improved = true;
+            if (
+              bestAudit.edgeCrossings === 0 &&
+              bestAudit.nodeHits === 0 &&
+              bestAudit.segmentOverlaps === 0
+            ) {
+              return { elements: bestElements, audit: bestAudit };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { elements: bestElements, audit: bestAudit };
+}
+
+/**
+ * Per-edge crossing polish: for connectors that currently cross other wires or hit nodes,
+ * test alternate exit/entry faces pointing generally toward the opposite node (e.g., exiting
+ * `left` instead of `bottom` on a top-right corner entity) and keep flips that strictly lower
+ * overall diagram conflicts.
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ */
+function optimizeCrossingConnectorSides(elements) {
+  let bestElements = elements;
+  let bestAudit = auditDiagramConflicts(bestElements);
+  if (bestAudit.edgeCrossings === 0 && bestAudit.nodeHits === 0) {
+    return { elements: bestElements, audit: bestAudit };
+  }
+
+  const nodeById = new Map(
+    bestElements.filter((e) => isConnectableElement(e)).map((e) => [e.id, e]),
+  );
+  const obstacles = bestElements
+    .filter((e) => isConnectableElement(e) && !CONTAINER_TYPES.has(e.type))
+    .map((e) => ({ id: e.id, rect: getNormalizedRect(e) }));
+
+  // Identify connectors involved in crossings or node collisions
+  const connectors = bestElements.filter(
+    (e) => e.type === 'connector' && !e.locked && e.routing !== 'straight' && e.startBinding && e.endBinding,
+  );
+  const polylines = connectors.map((c) => ({
+    conn: c,
+    pts: resolveConnectorAuditPolyline(c, nodeById),
+  }));
+
+  /** @type {Map<string, number>} */
+  const conflictDeg = new Map();
+  for (let i = 0; i < polylines.length; i += 1) {
+    for (let j = i + 1; j < polylines.length; j += 1) {
+      let crosses = false;
+      for (let s1 = 0; s1 < polylines[i].pts.length - 1 && !crosses; s1 += 1) {
+        for (let s2 = 0; s2 < polylines[j].pts.length - 1; s2 += 1) {
+          if (
+            segmentsStrictlyCross(
+              polylines[i].pts[s1],
+              polylines[i].pts[s1 + 1],
+              polylines[j].pts[s2],
+              polylines[j].pts[s2 + 1],
+            )
+          ) {
+            crosses = true;
+            break;
+          }
+        }
+      }
+      if (crosses) {
+        conflictDeg.set(polylines[i].conn.id, (conflictDeg.get(polylines[i].conn.id) || 0) + 1);
+        conflictDeg.set(polylines[j].conn.id, (conflictDeg.get(polylines[j].conn.id) || 0) + 1);
+      }
+    }
+  }
+
+  const targetIds = Array.from(conflictDeg.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([id]) => id);
+
+  for (const connId of targetIds) {
+    const currConn = bestElements.find((e) => e.id === connId);
+    if (!currConn || !currConn.startBinding || !currConn.endBinding) continue;
+    const src = nodeById.get(currConn.startBinding.elementId);
+    const dst = nodeById.get(currConn.endBinding.elementId);
+    if (!src || !dst) continue;
+
+    const dx = dst.x + dst.width / 2 - (src.x + src.width / 2);
+    const dy = dst.y + dst.height / 2 - (src.y + src.height / 2);
+
+    /** @type {import('../types/schema.js').PortSide[]} */
+    const startCandidates = [
+      dx >= 0 ? 'right' : 'left',
+      dy >= 0 ? 'bottom' : 'top',
+    ];
+    /** @type {import('../types/schema.js').PortSide[]} */
+    const endCandidates = [
+      dx >= 0 ? 'left' : 'right',
+      dy >= 0 ? 'top' : 'bottom',
+    ];
+
+    /** @type {Array<{ a: Pt, b: Pt }>} */
+    const otherSegs = [];
+    for (const el of bestElements) {
+      if (el.type !== 'connector' || el.id === connId) continue;
+      const pts = resolveConnectorAuditPolyline(el, nodeById);
+      for (let k = 0; k < pts.length - 1; k += 1) {
+        otherSegs.push({ a: pts[k], b: pts[k + 1] });
+      }
+    }
+
+    for (const sSide of startCandidates) {
+      for (const eSide of endCandidates) {
+        if (sSide === currConn.startBinding.side && eSide === currConn.endBinding.side) continue;
+
+        const trial = bestElements.map((el) => (el.id === connId ? structuredClone(el) : el));
+        const tc = trial.find((el) => el.id === connId);
+        if (!tc || !tc.startBinding || !tc.endBinding) continue;
+
+        const sAnch = computeSideAnchorNormalized(src, sSide, 0.5);
+        const eAnch = computeSideAnchorNormalized(dst, eSide, 0.5);
+        tc.startBinding = { elementId: src.id, side: sSide, rx: sAnch.rx, ry: sAnch.ry };
+        tc.endBinding = { elementId: dst.id, side: eSide, rx: eAnch.rx, ry: eAnch.ry };
+
+        const startPt = resolveBindingPoint(src, tc.startBinding);
+        const endPt = resolveBindingPoint(dst, tc.endBinding);
+        const fullPath = routeObstacleAvoidingOrtho(
+          startPt,
+          endPt,
+          sSide,
+          eSide,
+          obstacles,
+          new Set([src.id, dst.id]),
+          otherSegs,
+          getNormalizedRect(src),
+          getNormalizedRect(dst),
+        );
+        const clean = simplifyOrthoPath(fullPath);
+        tc.x = clean[0].x;
+        tc.y = clean[0].y;
+        tc.width = clean[clean.length - 1].x - clean[0].x;
+        tc.height = clean[clean.length - 1].y - clean[0].y;
+        const interior = clean.slice(1, -1);
+        tc.waypoints = interior.length > 0 ? interior : undefined;
+
+        const trialAudit = auditDiagramConflicts(trial);
+        if (trialAudit.score + 40 < bestAudit.score) {
+          // Re-place labels cleanly once a strictly better route is accepted
+          const routedList = trial
+            .filter((e) => e.type === 'connector')
+            .map((c) => ({ connector: c, path: resolveConnectorAuditPolyline(c, nodeById) }));
+          placeConnectorLabelsCleanly(routedList, obstacles);
+          bestElements = trial;
+          bestAudit = auditDiagramConflicts(bestElements);
         }
       }
     }
@@ -2771,13 +3225,19 @@ export function tidyDiagramElements(elements, options = {}) {
       }
     }
 
+    const polished = optimizeCrossingConnectorSides(bestEls);
+    if (polished.audit.score < bestAudit.score) {
+      bestEls = polished.elements;
+      bestAudit = polished.audit;
+    }
+
     return {
       elements: bestEls,
       metrics: { mode, before, after: bestAudit },
     };
   }
 
-  // Full mode: evaluate LR and TB layouts + adjacent-layer crossing-minimization swaps
+  // Full mode: evaluate semantic / layered layouts + multi-pass swap search + crossing-edge side polish
   const kind = inferDiagramKindFromElements(elements);
   const baseReset = resetUnlockedConnectors(elements);
 
@@ -2787,14 +3247,20 @@ export function tidyDiagramElements(elements, options = {}) {
   let bestEls = lrOpt.elements;
   let bestAudit = lrOpt.audit;
 
-  // Also evaluate TB orientation for flowcharts/ERD/UML/generic diagrams where vertical flow may yield fewer crossings
-  if (kind !== 'usecase') {
+  // Evaluate TB orientation for non-DFD / non-usecase diagrams (flowcharts, ERD, UML class, generic)
+  if (kind !== 'usecase' && kind !== 'dfd') {
     const tbRaw = layoutDiagramElements(baseReset, { direction: 'TB', kind });
     const tbOpt = optimizeLayerSwaps(tbRaw, 'TB');
     if (tbOpt.audit.score < bestAudit.score) {
       bestEls = tbOpt.elements;
       bestAudit = tbOpt.audit;
     }
+  }
+
+  const polished = optimizeCrossingConnectorSides(bestEls);
+  if (polished.audit.score < bestAudit.score) {
+    bestEls = polished.elements;
+    bestAudit = polished.audit;
   }
 
   return {

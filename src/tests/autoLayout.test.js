@@ -378,4 +378,128 @@ P5 --> E3 : Laporan Keuangan & Aktivitas
     }
     expect(connOnlyRes.metrics.after.labelCollisions).toBe(0);
   });
+
+  it('cleanly untangles a dense 15-node SIAKAD DFD Level 1 with zero node hits, zero overlaps, and separated entity/store corridors', () => {
+    const siakadDfd = `@startuml
+rectangle "Admin Akademik / BAAK" as Admin <<External>>
+rectangle "Mahasiswa" as Mhs <<External>>
+rectangle "Dosen" as Dosen <<External>>
+rectangle "Pimpinan" as Pimp <<External>>
+
+usecase "1.0\\nPengelolaan Data Master" as P1 <<Process>>
+usecase "2.0\\nPengelolaan Registrasi" as P2 <<Process>>
+usecase "3.0\\nPengelolaan KRS" as P3 <<Process>>
+usecase "4.0\\nPengelolaan Perkuliahan" as P4 <<Process>>
+usecase "5.0\\nPengelolaan Nilai" as P5 <<Process>>
+usecase "6.0\\nPembuatan Laporan Akademik" as P6 <<Process>>
+
+database "D1 Data Master Akademik" as D1 <<DataStore>>
+database "D2 Data Registrasi" as D2 <<DataStore>>
+database "D3 Data KRS" as D3 <<DataStore>>
+database "D4 Data Perkuliahan" as D4 <<DataStore>>
+database "D5 Data Nilai" as D5 <<DataStore>>
+
+Admin --> P1 : Data mahasiswa, dosen, MK
+P1 --> Admin : Konfirmasi pengelolaan data
+P1 --> D1 : Simpan data master
+D1 --> P1 : Data master
+D1 --> P2 : Data mahasiswa
+D1 --> P3 : Data mahasiswa & MK
+D1 --> P4 : Data dosen & MK
+D1 --> P6 : Data master akademik
+
+Mhs --> P2 : Data registrasi / daftar ulang
+P2 --> Mhs : Informasi status registrasi
+P2 --> D2 : Simpan registrasi
+D2 --> P2 : Status registrasi
+D2 --> P3 : Status registrasi
+D2 --> P6 : Data registrasi
+
+Mhs --> P3 : Pengajuan KRS
+P3 --> Mhs : KRS dan status persetujuan
+Dosen --> P3 : Persetujuan KRS
+P3 --> D3 : Simpan KRS
+D3 --> P3 : Data KRS
+D3 --> P4 : KRS yang disetujui
+D3 --> P5 : Data peserta kuliah
+
+Admin --> P4 : Data kelas dan jadwal
+Dosen --> P4 : Data presensi mahasiswa
+P4 --> Dosen : Daftar kelas & jadwal mengajar
+P4 --> Mhs : Jadwal & informasi presensi
+P4 --> D4 : Simpan kelas, jadwal & presensi
+D4 --> P4 : Data perkuliahan
+D4 --> P5 : Data presensi
+D4 --> P6 : Data perkuliahan
+
+Dosen --> P5 : Input nilai mahasiswa
+P5 --> Mhs : Informasi nilai dan KHS
+P5 --> D5 : Simpan nilai
+D5 --> P5 : Data nilai
+D5 --> P6 : Data nilai
+
+P6 --> Admin : Laporan dan rekap akademik
+P6 --> Pimp : Laporan statistik akademik
+@enduml`;
+
+    const parsed = parsePlantText(siakadDfd, { kind: 'dfd' });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    // Scramble node positions across mixed columns (simulating tangled 2D grid where stores/entities mix)
+    const scrambled = parsed.elements.map((el) => {
+      const copy = structuredClone(el);
+      if (copy.text?.includes('Data Master Akademik')) {
+        copy.x = 60;
+        copy.y = 60;
+      } else if (copy.text === 'Mahasiswa') {
+        copy.x = 860;
+        copy.y = 60;
+      } else if (copy.text?.includes('5.0')) {
+        copy.x = 860;
+        copy.y = 680;
+      }
+      return copy;
+    });
+
+    const fullTidied = tidyDiagramElements(scrambled, { mode: 'full' });
+    expect(fullTidied.elements).toHaveLength(parsed.elements.length);
+
+    // Every entity must live cleanly on the Left column, processes in Center, data stores on Right
+    const entities = fullTidied.elements.filter((e) => e.type.endsWith('_entity'));
+    const processes = fullTidied.elements.filter((e) => e.type.endsWith('_process'));
+    const stores = fullTidied.elements.filter((e) => e.type.endsWith('_datastore'));
+    const maxEntityRight = Math.max(...entities.map((e) => e.x + e.width));
+    const minProcLeft = Math.min(...processes.map((p) => p.x));
+    const maxProcRight = Math.max(...processes.map((p) => p.x + p.width));
+    const minStoreLeft = Math.min(...stores.map((s) => s.x));
+
+    expect(maxEntityRight).toBeLessThan(minProcLeft - 200);
+    expect(maxProcRight).toBeLessThan(minStoreLeft - 200);
+
+    // Processes ordered cleanly 1.0 -> 6.0 top-to-bottom (preserving logical DFD numbering)
+    const sortedProcs = [...processes].sort((a, b) => a.y - b.y);
+    expect(`${sortedProcs[0].code || ''} ${sortedProcs[0].text || ''}`).toContain('1.0');
+    expect(
+      `${sortedProcs[sortedProcs.length - 1].code || ''} ${sortedProcs[sortedProcs.length - 1].text || ''}`,
+    ).toContain('6.0');
+
+    // Pimpinan (connected only to 6.0) sits at bottom of Entities; all 15 nodes remain strictly non-overlapping
+    const sortedEntities = [...entities].sort((a, b) => a.y - b.y);
+    expect(sortedEntities[sortedEntities.length - 1].text).toBe('Pimpinan');
+    const allNodes = [...entities, ...processes, ...stores];
+    for (let i = 0; i < allNodes.length; i += 1) {
+      for (let j = i + 1; j < allNodes.length; j += 1) {
+        expect(rectsOverlap(getNormalizedRect(allNodes[i]), getNormalizedRect(allNodes[j]), 12)).toBe(false);
+      }
+    }
+
+    // Zero wire-through-node hits, zero collinear overlaps, and strict reduction in crossings & score
+    expect(fullTidied.metrics.after.nodeHits).toBe(0);
+    expect(fullTidied.metrics.after.segmentOverlaps).toBe(0);
+    expect(fullTidied.metrics.after.edgeCrossings).toBeLessThan(
+      fullTidied.metrics.before.edgeCrossings,
+    );
+    expect(fullTidied.metrics.after.score).toBeLessThan(fullTidied.metrics.before.score);
+  });
 });
