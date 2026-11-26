@@ -7,9 +7,12 @@ import {
   findConnectorLabelAtPoint,
   getConnectorLabelRect,
   getElementBounds,
+  getQuickConnectHandles,
   getRotationHandle,
   hitTestElement,
+  hitTestQuickConnectHandle,
   hitTestRotationHandle,
+  isPointNearQuickConnectZone,
   nearestPointOnPolyline,
   rectsIntersect,
 } from '../engine/geometry.js';
@@ -403,10 +406,10 @@ describe('360-degree symbol rotation', () => {
     expect(Math.round(aabb.width)).toBe(40);
     expect(Math.round(aabb.height)).toBe(200);
 
-    // Rotation knob moves to the right of the shape at 90° and hit-tests cleanly
+    // Corner rotation knob (NE) rotates cleanly around center (200, 120) at 90° and hit-tests cleanly
     const knob = getRotationHandle({ x: 100, y: 100, width: 200, height: 40 }, 1, 90);
-    expect(knob.x).toBeGreaterThan(220);
-    expect(Math.round(knob.y)).toBe(120);
+    expect(Math.round(knob.x)).toBe(238);
+    expect(Math.round(knob.y)).toBe(238);
     expect(hitTestRotationHandle(knob, { x: 100, y: 100, width: 200, height: 40 }, 1, 90)).toBe(true);
 
     // Ports & bound connector points rotate cleanly around center (200, 120)
@@ -604,5 +607,53 @@ describe('Flexible connector label geometry & hit-testing', () => {
     expect(nearest.x).toBe(220);
     expect(nearest.y).toBe(100);
     expect(nearest.distance).toBe(140);
+  });
+});
+
+describe('Figma/Draw.io quick-connect midpoint handles', () => {
+  it('places 4 outward midpoint block arrows cleanly separated from the top-right corner rotation knob', () => {
+    const el = createElementFromShape('rectangle', 200, 200);
+    el.x = 100;
+    el.y = 100;
+    el.width = 160;
+    el.height = 80;
+    el.rotation = 0;
+
+    const handles = getQuickConnectHandles(el, 1);
+    expect(handles).toHaveLength(4);
+
+    const bySide = Object.fromEntries(handles.map((h) => [h.localSide, h]));
+    expect(bySide.top.anchor).toEqual({ x: 180, y: 100 });
+    expect(bySide.top.x).toBeCloseTo(180, 4);
+    expect(bySide.top.y).toBeCloseTo(78, 4);
+    expect(bySide.right.x).toBeCloseTo(282, 4);
+    expect(bySide.right.y).toBeCloseTo(140, 4);
+    expect(bySide.bottom.x).toBeCloseTo(180, 4);
+    expect(bySide.bottom.y).toBeCloseTo(202, 4);
+    expect(bySide.left.x).toBeCloseTo(78, 4);
+    expect(bySide.left.y).toBeCloseTo(140, 4);
+
+    // Rotation handle now sits at the top-right corner (278, 82), far clear of the top midpoint arrow (180, 78)
+    const rotHandle = getRotationHandle({ x: 100, y: 100, width: 160, height: 80 }, 1, 0);
+    expect(rotHandle.x).toBeCloseTo(278, 4);
+    expect(rotHandle.y).toBeCloseTo(82, 4);
+    expect(Math.hypot(rotHandle.x - bySide.top.x, rotHandle.y - bySide.top.y)).toBeGreaterThanOrEqual(
+      90,
+    );
+
+    // Hit-testing & hover zone stability
+    expect(hitTestQuickConnectHandle({ x: 282, y: 140 }, el, 1)?.side).toBe('right');
+    expect(hitTestQuickConnectHandle({ x: 400, y: 400 }, el, 1)).toBeNull();
+    expect(isPointNearQuickConnectZone({ x: 282, y: 140 }, el, 1)).toBe(true);
+    expect(isPointNearQuickConnectZone({ x: 320, y: 140 }, el, 1)).toBe(false);
+
+    // 90-degree clockwise rotation maps local top to world right
+    const rotated = { ...el, rotation: 90 };
+    const rotHandles = getQuickConnectHandles(rotated, 1);
+    const rotTop = rotHandles.find((h) => h.localSide === 'top');
+    expect(rotTop?.side).toBe('right');
+    expect(rotTop?.x).toBeCloseTo(242, 4);
+    expect(rotTop?.y).toBeCloseTo(140, 4);
+    expect(hitTestQuickConnectHandle({ x: 242, y: 140 }, rotated, 1)?.side).toBe('right');
   });
 });

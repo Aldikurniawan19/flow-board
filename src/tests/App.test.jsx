@@ -1100,4 +1100,177 @@ p "1" -- "N" t : "MELAKUKAN"
       expect(useBoardStore.getState().feedback?.message).toContain('Persilangan: 2 → 0');
     });
   });
+
+  it('creates a bound connector by dragging from a shape midpoint quick-connect handle on hover or click', async () => {
+    vi.spyOn(apiClient, 'getMe').mockResolvedValue({
+      user: {
+        id: 'u1',
+        name: 'Aldi',
+        email: 'aldi@example.com',
+        plan: 'free',
+        isOwner: false,
+        hasAiAccess: false,
+      },
+    });
+    vi.spyOn(apiClient, 'listBoards').mockResolvedValue({
+      boards: [{ id: 'b1', title: 'Quick Connect Board', createdAt: '', updatedAt: '' }],
+    });
+    vi.spyOn(apiClient, 'getBoard').mockResolvedValue({
+      board: {
+        id: 'b1',
+        title: 'Quick Connect Board',
+        settings: { renderMode: 'clean', gridMode: 'dots', snapToGrid: false },
+        elements: [
+          {
+            id: 'n1',
+            type: 'rectangle',
+            x: 100,
+            y: 120,
+            width: 120,
+            height: 80,
+            strokeColor: '#0F172A',
+            fillColor: '#FFFFFF',
+            strokeWidth: 2,
+            strokeStyle: 'solid',
+            roughness: 0,
+            opacity: 1,
+            seed: 1,
+            text: 'Start',
+          },
+          {
+            id: 'n2',
+            type: 'rectangle',
+            x: 360,
+            y: 120,
+            width: 120,
+            height: 80,
+            strokeColor: '#0F172A',
+            fillColor: '#FFFFFF',
+            strokeWidth: 2,
+            strokeStyle: 'solid',
+            roughness: 0,
+            opacity: 1,
+            seed: 2,
+            text: 'End',
+          },
+        ],
+      },
+    });
+    vi.spyOn(apiClient, 'updateBoard').mockResolvedValue({
+      board: { id: 'b1', title: 'Quick Connect Board', updatedAt: '' },
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    const canvas = await screen.findByLabelText('Kanvas papan tulis FlowBoard');
+    canvas.setPointerCapture = vi.fn();
+    canvas.releasePointerCapture = vi.fn();
+    canvas.hasPointerCapture = vi.fn(() => false);
+
+    await waitFor(() => {
+      expect(useBoardStore.getState().elements).toHaveLength(2);
+    });
+
+    act(() => {
+      useBoardStore.getState().setCamera({ x: 0, y: 0, zoom: 1 });
+      useBoardStore.getState().setSelectedIds([]);
+      useBoardStore.getState().setActiveTool('select');
+    });
+
+    // 1. Hover over n1 (unselected), then hover its right quick-connect arrow (220 + 22 = 242, 160) -> translucent hover strip appears
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, cancelable: true, clientX: 160, clientY: 160 }),
+      );
+    });
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, cancelable: true, clientX: 242, clientY: 160 }),
+      );
+    });
+    expect(canvas.style.cursor).toBe('crosshair');
+    expect(screen.getByRole('menu', { name: 'Tambah simbol cepat' })).toBeInTheDocument();
+
+    // Dragging directly from the right quick-connect arrow to n2 left port (360, 160) still draws a bound connector
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 242,
+          clientY: 160,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 360,
+          clientY: 160,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointerup', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 360,
+          clientY: 160,
+          button: 0,
+        }),
+      );
+    });
+
+    const connectors = useBoardStore.getState().elements.filter((el) => el.type === 'connector');
+    expect(connectors).toHaveLength(1);
+    expect(connectors[0].startBinding?.elementId).toBe('n1');
+    expect(connectors[0].startBinding?.side).toBe('right');
+    expect(connectors[0].endBinding?.elementId).toBe('n2');
+    expect(connectors[0].endBinding?.side).toBe('left');
+
+    // 2. Selecting n1 and clicking (without dragging) its bottom quick-connect arrow (160, 222) opens the compact shape picker popover
+    act(() => {
+      useBoardStore.getState().setSelectedIds(['n1']);
+    });
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 160,
+          clientY: 222,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointerup', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 160,
+          clientY: 222,
+          button: 0,
+        }),
+      );
+    });
+    expect(useBoardStore.getState().elements.filter((el) => el.type === 'connector')).toHaveLength(1);
+    expect(screen.getByRole('menu', { name: 'Pilih simbol lanjutan' })).toBeInTheDocument();
+
+    // 3. Clicking a common shape (Belah Ketupat) in the popover spawns it below n1 and auto-connects n1(bottom) -> newShape(top)
+    await user.click(screen.getByRole('menuitem', { name: 'Tambah Belah Ketupat' }));
+    const spawnedDiamond = useBoardStore.getState().elements.find((el) => el.type === 'diamond');
+    expect(spawnedDiamond).toBeDefined();
+    expect(spawnedDiamond?.y).toBeGreaterThan(200);
+    const autoConn = useBoardStore
+      .getState()
+      .elements.find(
+        (el) =>
+          el.type === 'connector' &&
+          el.startBinding?.elementId === 'n1' &&
+          el.endBinding?.elementId === spawnedDiamond?.id,
+      );
+    expect(autoConn?.startBinding?.side).toBe('bottom');
+    expect(autoConn?.endBinding?.side).toBe('top');
+  });
 });

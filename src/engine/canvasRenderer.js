@@ -4,6 +4,7 @@ import { FONT_FAMILY_MAP, GRID_SIZE, UI_TOKENS } from '../constants/tokens.js';
 import {
   getConnectorLabelRect,
   getElementBounds,
+  getQuickConnectHandles,
   getResizeHandles,
   getRotationHandle,
   nearestPointOnPolyline,
@@ -375,6 +376,9 @@ export function drawConnectorElement(
  *   showPortsForId: string | null,
  *   hoveredLabelId?: string | null,
  *   draggingLabelId?: string | null,
+ *   quickConnectTargetIds?: string[],
+ *   hoveredQuickConnect?: { elementId: string, side: import('../types/schema.js').PortSide } | null,
+ *   activeQuickConnect?: { elementId: string, side: import('../types/schema.js').PortSide } | null,
  *   guides: Array<{ axis: 'x' | 'y', pos: number, from: number, to: number }>,
  *   marquee: { x: number, y: number, width: number, height: number } | null
  * }} state
@@ -615,18 +619,11 @@ export function renderCanvasScene(canvas, state) {
           ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs);
         }
 
-        // Top rotation stem & circular handle with curved counter-clockwise arrow icon
+        // Corner rotation handle at top-right (NE) with curved counter-clockwise arrow icon
         const knobLocal = getRotationHandle(r, state.camera.zoom, 0);
-        const kr = 9 / state.camera.zoom;
+        const kr = 8.5 / state.camera.zoom;
         const kx = knobLocal.x;
         const ky = knobLocal.y;
-
-        ctx.beginPath();
-        ctx.moveTo(knobLocal.stemStart.x, knobLocal.stemStart.y);
-        ctx.lineTo(kx, ky + kr);
-        ctx.strokeStyle = uiAccent;
-        ctx.lineWidth = 1.5 / state.camera.zoom;
-        ctx.stroke();
 
         ctx.beginPath();
         ctx.arc(kx, ky, kr, 0, Math.PI * 2);
@@ -637,7 +634,7 @@ export function renderCanvasScene(canvas, state) {
         ctx.stroke();
 
         // Crisp circular arrow icon (open ~285° arc + top-left arrowhead, matching RotateCcw)
-        const iconR = 4.6 / state.camera.zoom;
+        const iconR = 4.4 / state.camera.zoom;
         const startAng = -Math.PI * 0.72; // top-left arrowhead tip
         const endAng = Math.PI * 0.92; // wraps clockwise around top -> right -> bottom -> left
         ctx.beginPath();
@@ -650,7 +647,7 @@ export function renderCanvasScene(canvas, state) {
         // Arrowhead at top-left pointing counter-clockwise
         const tipX = kx + iconR * Math.cos(startAng);
         const tipY = ky + iconR * Math.sin(startAng);
-        const headLen = 2.8 / state.camera.zoom;
+        const headLen = 2.6 / state.camera.zoom;
         ctx.beginPath();
         ctx.moveTo(tipX - headLen * 0.15, tipY - headLen * 0.95);
         ctx.lineTo(tipX, tipY);
@@ -721,6 +718,129 @@ export function renderCanvasScene(canvas, state) {
           );
         }
         ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  // Draw.io-style quick-connect block arrows & perimeter port crosses on hovered/selected shapes
+  const quickConnectIds = state.quickConnectTargetIds || [];
+  if (quickConnectIds.length > 0) {
+    const ELLIPTICAL_TYPES = new Set([
+      'ellipse',
+      'dfd_yd_process',
+      'bpmn_start',
+      'bpmn_intermediate',
+      'bpmn_end',
+      'erd_attribute',
+      'erd_key_attribute',
+      'uml_usecase',
+      'uml_initial',
+      'uml_final',
+    ]);
+    const DIAMOND_TYPES = new Set([
+      'diamond',
+      'fc_decision',
+      'erd_relationship',
+      'bpmn_gateway_xor',
+      'bpmn_gateway_and',
+    ]);
+
+    for (const targetId of quickConnectIds) {
+      const target = elementsById.get(targetId);
+      if (!target || !isConnectableElement(target) || target.locked) continue;
+
+      // Subtle Draw.io cyan 'x' connection port crosses on hovered (unselected) shapes
+      if (!selectedSet.has(target.id)) {
+        const b = getNormalizedRect(target);
+        const cx = b.x + b.width / 2;
+        const cy = b.y + b.height / 2;
+        const rx = b.width / 2;
+        const ry = b.height / 2;
+        const isEllipse = ELLIPTICAL_TYPES.has(target.type);
+        const isDiamond = DIAMOND_TYPES.has(target.type);
+
+        const localCrosses = [
+          { x: cx, y: b.y },
+          { x: b.x + b.width, y: cy },
+          { x: cx, y: b.y + b.height },
+          { x: b.x, y: cy },
+        ];
+        if (!isDiamond) {
+          const diag = isEllipse ? Math.SQRT1_2 : 1;
+          localCrosses.push(
+            { x: cx + rx * diag, y: cy - ry * diag },
+            { x: cx + rx * diag, y: cy + ry * diag },
+            { x: cx - rx * diag, y: cy + ry * diag },
+            { x: cx - rx * diag, y: cy - ry * diag },
+          );
+        }
+
+        const arm = 2.4 / state.camera.zoom;
+        ctx.save();
+        if (target.rotation) {
+          ctx.translate(cx, cy);
+          ctx.rotate((target.rotation * Math.PI) / 180);
+          ctx.translate(-cx, -cy);
+        }
+        ctx.strokeStyle = isDark ? '#38BDF8' : '#0284C7';
+        ctx.lineWidth = 1.35 / state.camera.zoom;
+        ctx.lineCap = 'round';
+        for (const pt of localCrosses) {
+          ctx.beginPath();
+          ctx.moveTo(pt.x - arm, pt.y - arm);
+          ctx.lineTo(pt.x + arm, pt.y + arm);
+          ctx.moveTo(pt.x + arm, pt.y - arm);
+          ctx.lineTo(pt.x - arm, pt.y + arm);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      const handles = getQuickConnectHandles(target, state.camera.zoom);
+      for (const h of handles) {
+        const isActive =
+          (state.hoveredQuickConnect?.elementId === target.id &&
+            state.hoveredQuickConnect?.side === h.side) ||
+          (state.activeQuickConnect?.elementId === target.id &&
+            state.activeQuickConnect?.side === h.side);
+
+        ctx.save();
+        ctx.translate(h.x, h.y);
+        ctx.rotate(h.angle);
+
+        // Draw.io-style block arrow pointing outward along +X
+        const tailX = -10.5 / state.camera.zoom;
+        const neckX = 1.5 / state.camera.zoom;
+        const tipX = 11.5 / state.camera.zoom;
+        const shaftH = 3.2 / state.camera.zoom;
+        const headH = 8.2 / state.camera.zoom;
+
+        ctx.beginPath();
+        ctx.moveTo(tailX, -shaftH);
+        ctx.lineTo(neckX, -shaftH);
+        ctx.lineTo(neckX, -headH);
+        ctx.lineTo(tipX, 0);
+        ctx.lineTo(neckX, headH);
+        ctx.lineTo(neckX, shaftH);
+        ctx.lineTo(tailX, shaftH);
+        ctx.closePath();
+
+        if (isActive) {
+          ctx.fillStyle = '#29B6F6';
+          ctx.fill();
+          ctx.strokeStyle = isDark ? '#FFFFFF' : '#0369A1';
+          ctx.lineWidth = 1.5 / state.camera.zoom;
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = isDark ? 'rgba(56, 189, 248, 0.22)' : 'rgba(14, 165, 233, 0.20)';
+          ctx.fill();
+          ctx.strokeStyle = isDark ? 'rgba(148, 163, 184, 0.42)' : 'rgba(2, 132, 199, 0.45)';
+          ctx.lineWidth = 1.1 / state.camera.zoom;
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+        }
         ctx.restore();
       }
     }

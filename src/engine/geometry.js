@@ -1,4 +1,10 @@
-import { getNormalizedRect, rotatePoint, unrotatePoint } from './ports.js';
+import {
+  getNormalizedRect,
+  isConnectableElement,
+  rotatePoint,
+  rotatePortSide,
+  unrotatePoint,
+} from './ports.js';
 import { computeConnectorPath } from './router.js';
 
 /**
@@ -359,7 +365,8 @@ export function getResizeHandles(rect, rotation = 0) {
 }
 
 /**
- * Compute world position of the top rotation knob for a selected shape.
+ * Compute world position of the top-right corner rotation handle for a selected shape.
+ * Positioned outside the NE corner so the top midpoint stays unobstructed for quick-connect arrows.
  * @param {Rect} rect
  * @param {number} zoom
  * @param {number} [rotation]
@@ -370,12 +377,123 @@ export function getRotationHandle(rect, zoom, rotation = 0) {
   const cy = rect.y + rect.height / 2;
   const center = { x: cx, y: cy };
   const pad = 4 / zoom;
-  const stemDist = 28 / zoom;
-  const localStem = { x: cx, y: rect.y - pad };
-  const localKnob = { x: cx, y: rect.y - stemDist };
+  const cornerDist = 18 / zoom;
+  const localStem = { x: rect.x + rect.width + pad, y: rect.y - pad };
+  const localKnob = { x: rect.x + rect.width + cornerDist, y: rect.y - cornerDist };
   const knob = rotation ? rotatePoint(localKnob, center, rotation) : localKnob;
   const stemStart = rotation ? rotatePoint(localStem, center, rotation) : localStem;
   return { x: knob.x, y: knob.y, stemStart };
+}
+
+/**
+ * Compute world positions of the 4 Draw.io-style quick-connect block arrow handles
+ * positioned outside each cardinal midpoint of a connectable shape (rotation-aware).
+ * @param {import('../types/schema.js').BoardElement} el
+ * @param {number} zoom
+ * @returns {Array<{
+ *   localSide: import('../types/schema.js').PortSide,
+ *   side: import('../types/schema.js').PortSide,
+ *   rx: number,
+ *   ry: number,
+ *   anchor: { x: number, y: number },
+ *   x: number,
+ *   y: number,
+ *   angle: number
+ * }>}
+ */
+export function getQuickConnectHandles(el, zoom) {
+  if (!isConnectableElement(el)) return [];
+  const r = getNormalizedRect(el);
+  const cx = r.x + r.width / 2;
+  const cy = r.y + r.height / 2;
+  const center = { x: cx, y: cy };
+  const rot = el.rotation || 0;
+  const offset = 22 / zoom;
+
+  const specs = [
+    {
+      localSide: /** @type {const} */ ('top'),
+      rx: 0.5,
+      ry: 0,
+      localAnchor: { x: cx, y: r.y },
+      localHandle: { x: cx, y: r.y - offset },
+    },
+    {
+      localSide: /** @type {const} */ ('right'),
+      rx: 1,
+      ry: 0.5,
+      localAnchor: { x: r.x + r.width, y: cy },
+      localHandle: { x: r.x + r.width + offset, y: cy },
+    },
+    {
+      localSide: /** @type {const} */ ('bottom'),
+      rx: 0.5,
+      ry: 1,
+      localAnchor: { x: cx, y: r.y + r.height },
+      localHandle: { x: cx, y: r.y + r.height + offset },
+    },
+    {
+      localSide: /** @type {const} */ ('left'),
+      rx: 0,
+      ry: 0.5,
+      localAnchor: { x: r.x, y: cy },
+      localHandle: { x: r.x - offset, y: cy },
+    },
+  ];
+
+  return specs.map((spec) => {
+    const anchor = rot ? rotatePoint(spec.localAnchor, center, rot) : spec.localAnchor;
+    const handle = rot ? rotatePoint(spec.localHandle, center, rot) : spec.localHandle;
+    return {
+      localSide: spec.localSide,
+      side: rot ? rotatePortSide(spec.localSide, rot) : spec.localSide,
+      rx: spec.rx,
+      ry: spec.ry,
+      anchor,
+      x: handle.x,
+      y: handle.y,
+      angle: Math.atan2(handle.y - anchor.y, handle.x - anchor.x),
+    };
+  });
+}
+
+/**
+ * Hit-test the 4 quick-connect block arrow handles around a shape.
+ * @param {{ x: number, y: number }} worldPoint
+ * @param {import('../types/schema.js').BoardElement} el
+ * @param {number} zoom
+ */
+export function hitTestQuickConnectHandle(worldPoint, el, zoom) {
+  if (!isConnectableElement(el) || el.locked) return null;
+  const radius = 14 / zoom;
+  for (const h of getQuickConnectHandles(el, zoom)) {
+    if (Math.hypot(worldPoint.x - h.x, worldPoint.y - h.y) <= radius) {
+      return h;
+    }
+  }
+  return null;
+}
+
+/**
+ * Check whether `worldPoint` lies inside the shape or within the smooth hover margin
+ * leading out to its 4 quick-connect block arrows (prevents hover flicker while reaching an arrow).
+ * @param {{ x: number, y: number }} worldPoint
+ * @param {import('../types/schema.js').BoardElement} el
+ * @param {number} zoom
+ * @returns {boolean}
+ */
+export function isPointNearQuickConnectZone(worldPoint, el, zoom) {
+  if (!isConnectableElement(el) || el.locked) return false;
+  const r = getNormalizedRect(el);
+  const center = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  const localPt = el.rotation ? unrotatePoint(worldPoint, center, el.rotation) : worldPoint;
+  const pad = 40 / zoom;
+  return (
+    localPt.x >= r.x - pad &&
+    localPt.x <= r.x + r.width + pad &&
+    localPt.y >= r.y - pad &&
+    localPt.y <= r.y + r.height + pad
+  );
 }
 
 /**

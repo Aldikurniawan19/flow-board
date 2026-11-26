@@ -10,9 +10,12 @@ import {
   findTopmostElementAtPoint,
   getConnectorLabelRect,
   getElementBounds,
+  getQuickConnectHandles,
   getResizeHandles,
+  hitTestQuickConnectHandle,
   hitTestResizeHandle,
   hitTestRotationHandle,
+  isPointNearQuickConnectZone,
   rectsIntersect,
 } from '../engine/geometry.js';
 import {
@@ -25,6 +28,7 @@ import { computeConnectorPath } from '../engine/router.js';
 import { recognizeFreehandShape } from '../engine/shapeRecognizer.js';
 import { createElementFromShape, morphElementShape } from '../engine/shapeRegistry.js';
 import { useBoardStore } from '../store/useBoardStore.js';
+import { QuickConnectMenu } from './QuickConnectMenu.jsx';
 import { ShapeContextMenu } from './ShapeContextMenu.jsx';
 
 const TOOL_SHORTCUTS = {
@@ -58,6 +62,19 @@ export function WhiteboardCanvas() {
     ),
   );
   const [showPortsForId, setShowPortsForId] = useState(/** @type {string | null} */ (null));
+  const [hoveredShapeId, setHoveredShapeId] = useState(/** @type {string | null} */ (null));
+  const [hoveredQuickConnect, setHoveredQuickConnect] = useState(
+    /** @type {{ elementId: string, side: import('../types/schema.js').PortSide, handle: ReturnType<typeof getQuickConnectHandles>[number] } | null} */ (
+      null
+    ),
+  );
+  const [quickConnectClickMenu, setQuickConnectClickMenu] = useState(
+    /** @type {{ elementId: string, side: import('../types/schema.js').PortSide, handle: ReturnType<typeof getQuickConnectHandles>[number] } | null} */ (
+      null
+    ),
+  );
+  const quickConnectMenuHoverRef = useRef(false);
+  const quickConnectLeaveTimerRef = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
   const [hoveredLabelId, setHoveredLabelId] = useState(/** @type {string | null} */ (null));
   const [draggingLabelId, setDraggingLabelId] = useState(/** @type {string | null} */ (null));
   const [cursorStyle, setCursorStyle] = useState('default');
@@ -73,11 +90,37 @@ export function WhiteboardCanvas() {
   const theme = useBoardStore((s) => s.theme);
   const selectedIds = useBoardStore((s) => s.selectedIds);
   const editingId = useBoardStore((s) => s.editingId);
+  const activeTool = useBoardStore((s) => s.activeTool);
+
+  useEffect(() => {
+    return () => {
+      if (quickConnectLeaveTimerRef.current) {
+        clearTimeout(quickConnectLeaveTimerRef.current);
+      }
+    };
+  }, []);
 
   // Render canvas synchronously on commit so theme View Transitions capture the updated canvas immediately
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    /** @type {string[]} */
+    const quickConnectTargetIds = [];
+    if (activeTool === 'select' && !editingId && !draggingLabelId && !marquee) {
+      /** @param {string | null | undefined} id */
+      const addTarget = (id) => {
+        if (!id || quickConnectTargetIds.includes(id)) return;
+        const el = elements.find((item) => item.id === id);
+        if (el && !el.locked && isConnectableElement(el)) {
+          quickConnectTargetIds.push(el.id);
+        }
+      };
+      if (selectedIds.length === 1) {
+        addTarget(selectedIds[0]);
+      }
+      addTarget(hoveredShapeId);
+      addTarget(quickConnectClickMenu?.elementId);
+    }
     renderCanvasScene(canvas, {
       elements,
       camera,
@@ -86,6 +129,11 @@ export function WhiteboardCanvas() {
       selectedIds,
       hoveredPort,
       showPortsForId,
+      quickConnectTargetIds,
+      hoveredQuickConnect,
+      activeQuickConnect: quickConnectClickMenu
+        ? { elementId: quickConnectClickMenu.elementId, side: quickConnectClickMenu.side }
+        : null,
       hoveredLabelId,
       draggingLabelId,
       guides,
@@ -97,8 +145,13 @@ export function WhiteboardCanvas() {
     settings,
     theme,
     selectedIds,
+    editingId,
+    activeTool,
     hoveredPort,
     showPortsForId,
+    hoveredShapeId,
+    hoveredQuickConnect,
+    quickConnectClickMenu,
     hoveredLabelId,
     draggingLabelId,
     guides,
@@ -351,6 +404,7 @@ export function WhiteboardCanvas() {
     // Let onContextMenu handle right-click without altering selection or starting drag
     if (e.button === 2) return;
     if (contextMenu) setContextMenu(null);
+    if (quickConnectClickMenu) setQuickConnectClickMenu(null);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -615,6 +669,68 @@ export function WhiteboardCanvas() {
       }
     }
 
+    // Figma/Draw.io-style quick-connect handles on hovered or selected connectable shapes
+    if (!isMultiSelectMod) {
+      /** @type {string[]} */
+      const qcCandidates = [];
+      if (hoveredShapeId) qcCandidates.push(hoveredShapeId);
+      if (quickConnectClickMenu?.elementId && !qcCandidates.includes(quickConnectClickMenu.elementId)) {
+        qcCandidates.push(quickConnectClickMenu.elementId);
+      }
+      if (store.selectedIds.length === 1 && !qcCandidates.includes(store.selectedIds[0])) {
+        qcCandidates.push(store.selectedIds[0]);
+      }
+      for (const candId of qcCandidates) {
+        const candEl = elementsById.get(candId);
+        if (!candEl || candEl.locked || !isConnectableElement(candEl)) continue;
+        const qc = hitTestQuickConnectHandle(world, candEl, store.camera.zoom);
+        if (qc) {
+          /** @type {import('../types/schema.js').BoardElement} */
+          const conn = {
+            id: crypto.randomUUID(),
+            type: 'connector',
+            x: qc.anchor.x,
+            y: qc.anchor.y,
+            width: 0,
+            height: 0,
+            strokeColor: store.defaultStrokeColor,
+            fillColor: 'transparent',
+            strokeWidth: 2,
+            strokeStyle: 'solid',
+            roughness: store.settings.renderMode === 'sketch' ? 1.3 : 0,
+            opacity: 1,
+            seed: Math.floor(Math.random() * 100000),
+            text: '',
+            routing: store.defaultRouting,
+            startMarker: 'none',
+            endMarker: store.defaultEndMarker,
+            startBinding: {
+              elementId: candEl.id,
+              side: qc.side,
+              rx: qc.rx,
+              ry: qc.ry,
+            },
+            endBinding: null,
+          };
+          store.addElement(conn);
+          setQuickConnectClickMenu(null);
+          setHoveredShapeId(null);
+          setHoveredQuickConnect(null);
+          setHoveredLabelId(null);
+          setCursorStyle('crosshair');
+          interactionRef.current = {
+            mode: 'draw-connector',
+            id: conn.id,
+            fromQuickConnect: true,
+            sourceElementId: candEl.id,
+            startAnchor: qc.anchor,
+            quickConnectHandle: qc,
+          };
+          return;
+        }
+      }
+    }
+
     // Direct 1-click drag on any unlocked connector's text label (even if the connector is not selected yet)
     if (!isMultiSelectMod) {
       const labelHit = findConnectorLabelAtPoint(
@@ -726,6 +842,8 @@ export function WhiteboardCanvas() {
     if (!interaction) {
       // Hover feedback for flexible connector anchors
       if (store.activeTool === 'connector') {
+        if (hoveredShapeId) setHoveredShapeId(null);
+        if (hoveredQuickConnect) setHoveredQuickConnect(null);
         const port = findNearestPort(world, store.elements, new Set(), 22 / store.camera.zoom, {
           allowInterior: e.altKey,
           centerSnapPx: 6 / store.camera.zoom,
@@ -744,12 +862,21 @@ export function WhiteboardCanvas() {
         if (showPortsForId) setShowPortsForId(null);
 
         if (store.activeTool === 'hand' || spacePressedRef.current) {
+          if (hoveredShapeId) setHoveredShapeId(null);
+          if (hoveredQuickConnect) setHoveredQuickConnect(null);
           setCursorStyle('grab');
         } else if (store.activeTool === 'select') {
           let nextCursor = 'default';
           let nextHoveredLabelId = /** @type {string | null} */ (null);
+          let nextHoveredShapeId = /** @type {string | null} */ (null);
+          let nextHoveredQuickConnect =
+            /** @type {{ elementId: string, side: import('../types/schema.js').PortSide, handle: ReturnType<typeof getQuickConnectHandles>[number] } | null} */ (
+              null
+            );
+          const map = new Map(store.elements.map((el) => [el.id, el]));
+
           if (store.selectedIds.length === 1) {
-            const sel = store.elements.find((el) => el.id === store.selectedIds[0]);
+            const sel = map.get(store.selectedIds[0]);
             if (sel && !sel.locked && sel.type !== 'connector' && sel.type !== 'freehand') {
               const rect = getNormalizedRect(sel);
               const rot = sel.rotation || 0;
@@ -764,8 +891,45 @@ export function WhiteboardCanvas() {
               }
             }
           }
+
+          // Track hovered connectable shape with an outer margin so moving to quick-connect handles stays stable
+          const topHit = findTopmostElementAtPoint(world, store.elements, map, 6 / store.camera.zoom);
+          if (topHit && !topHit.locked && isConnectableElement(topHit)) {
+            nextHoveredShapeId = topHit.id;
+          } else if (hoveredShapeId) {
+            const prevHovered = map.get(hoveredShapeId);
+            if (
+              prevHovered &&
+              !prevHovered.locked &&
+              isConnectableElement(prevHovered) &&
+              isPointNearQuickConnectZone(world, prevHovered, store.camera.zoom)
+            ) {
+              nextHoveredShapeId = prevHovered.id;
+            }
+          }
+
+          // Check quick-connect handles (priority right after rotation/resize handles)
           if (nextCursor === 'default') {
-            const map = new Map(store.elements.map((el) => [el.id, el]));
+            /** @type {string[]} */
+            const qcCandidates = [];
+            if (nextHoveredShapeId) qcCandidates.push(nextHoveredShapeId);
+            if (store.selectedIds.length === 1 && !qcCandidates.includes(store.selectedIds[0])) {
+              qcCandidates.push(store.selectedIds[0]);
+            }
+            for (const candId of qcCandidates) {
+              const candEl = map.get(candId);
+              if (!candEl || candEl.locked || !isConnectableElement(candEl)) continue;
+              const qc = hitTestQuickConnectHandle(world, candEl, store.camera.zoom);
+              if (qc) {
+                nextHoveredQuickConnect = { elementId: candEl.id, side: qc.side, handle: qc };
+                nextHoveredShapeId = candEl.id;
+                nextCursor = 'crosshair';
+                break;
+              }
+            }
+          }
+
+          if (nextCursor === 'default') {
             const labelHover = findConnectorLabelAtPoint(
               world,
               store.elements,
@@ -777,11 +941,27 @@ export function WhiteboardCanvas() {
               nextCursor = 'move';
             }
           }
+
+          if (quickConnectLeaveTimerRef.current) {
+            clearTimeout(quickConnectLeaveTimerRef.current);
+            quickConnectLeaveTimerRef.current = null;
+          }
+          if (hoveredShapeId !== nextHoveredShapeId) {
+            setHoveredShapeId(nextHoveredShapeId);
+          }
+          if (
+            (hoveredQuickConnect?.elementId ?? null) !== (nextHoveredQuickConnect?.elementId ?? null) ||
+            (hoveredQuickConnect?.side ?? null) !== (nextHoveredQuickConnect?.side ?? null)
+          ) {
+            setHoveredQuickConnect(nextHoveredQuickConnect);
+          }
           if (hoveredLabelId !== nextHoveredLabelId) {
             setHoveredLabelId(nextHoveredLabelId);
           }
           setCursorStyle(nextCursor);
         } else {
+          if (hoveredShapeId) setHoveredShapeId(null);
+          if (hoveredQuickConnect) setHoveredQuickConnect(null);
           if (hoveredLabelId) setHoveredLabelId(null);
           setCursorStyle('crosshair');
         }
@@ -836,10 +1016,20 @@ export function WhiteboardCanvas() {
     }
 
     if (interaction.mode === 'draw-connector') {
+      const excludeIds = new Set([interaction.id]);
+      if (
+        interaction.fromQuickConnect &&
+        interaction.sourceElementId &&
+        interaction.startAnchor &&
+        Math.hypot(world.x - interaction.startAnchor.x, world.y - interaction.startAnchor.y) <
+          18 / store.camera.zoom
+      ) {
+        excludeIds.add(interaction.sourceElementId);
+      }
       const port = findNearestPort(
         world,
         store.elements,
-        new Set([interaction.id]),
+        excludeIds,
         22 / store.camera.zoom,
         { allowInterior: e.altKey, centerSnapPx: 6 / store.camera.zoom },
       );
@@ -1316,6 +1506,27 @@ export function WhiteboardCanvas() {
         );
       }
       if (interaction.mode === 'draw-connector') {
+        if (interaction.fromQuickConnect) {
+          const created = store.elements.find((el) => el.id === interaction.id);
+          if (
+            created &&
+            !created.endBinding &&
+            Math.hypot(created.width, created.height) < 10 / store.camera.zoom
+          ) {
+            // Simple click on the quick-connect arrow -> undo 0px temp line & open compact shape picker popover
+            store.undo();
+            if (interaction.sourceElementId && interaction.quickConnectHandle) {
+              setQuickConnectClickMenu({
+                elementId: interaction.sourceElementId,
+                side: interaction.quickConnectHandle.side,
+                handle: interaction.quickConnectHandle,
+              });
+            }
+            setCursorStyle('default');
+            return;
+          }
+        }
+        setCursorStyle('default');
         store.setActiveTool('select');
       }
       store.scheduleAutosave();
@@ -1409,6 +1620,126 @@ export function WhiteboardCanvas() {
     store.setActiveTool('select');
   }
 
+  /**
+   * Spawn a new shape beside `sourceElementId` in the direction of the quick-connect arrow
+   * and connect them with a bound connector in a single undoable step.
+   * @param {string} sourceElementId
+   * @param {ReturnType<typeof getQuickConnectHandles>[number]} handle
+   * @param {string} targetType
+   */
+  function spawnQuickConnectedShape(sourceElementId, handle, targetType) {
+    const store = useBoardStore.getState();
+    const sourceEl = store.elements.find((el) => el.id === sourceElementId);
+    if (!sourceEl || sourceEl.locked) return;
+
+    // Recompute handle fresh in case the source moved/zoomed
+    const freshHandle =
+      getQuickConnectHandles(sourceEl, store.camera.zoom).find(
+        (h) => h.side === handle.side && h.localSide === handle.localSide,
+      ) || handle;
+
+    const newEl = createElementFromShape(targetType, 0, 0, {
+      renderMode: store.settings.renderMode,
+    });
+    const gap = 72;
+    const anchor = freshHandle.anchor;
+
+    /** @type {Record<import('../types/schema.js').PortSide, { side: import('../types/schema.js').PortSide, rx: number, ry: number }>} */
+    const OPPOSITE_PORT = {
+      top: { side: 'bottom', rx: 0.5, ry: 1 },
+      right: { side: 'left', rx: 0, ry: 0.5 },
+      bottom: { side: 'top', rx: 0.5, ry: 0 },
+      left: { side: 'right', rx: 1, ry: 0.5 },
+    };
+    const opp = OPPOSITE_PORT[freshHandle.side];
+
+    let rawX = anchor.x + gap;
+    let rawY = anchor.y - newEl.height / 2;
+    if (freshHandle.side === 'left') {
+      rawX = anchor.x - gap - newEl.width;
+      rawY = anchor.y - newEl.height / 2;
+    } else if (freshHandle.side === 'bottom') {
+      rawX = anchor.x - newEl.width / 2;
+      rawY = anchor.y + gap;
+    } else if (freshHandle.side === 'top') {
+      rawX = anchor.x - newEl.width / 2;
+      rawY = anchor.y - gap - newEl.height;
+    }
+
+    newEl.x = snapValue(rawX, GRID_SIZE, store.settings.snapToGrid);
+    newEl.y = snapValue(rawY, GRID_SIZE, store.settings.snapToGrid);
+
+    const endAnchor = {
+      x: newEl.x + newEl.width * opp.rx,
+      y: newEl.y + newEl.height * opp.ry,
+    };
+
+    /** @type {import('../types/schema.js').BoardElement} */
+    const conn = {
+      id: crypto.randomUUID(),
+      type: 'connector',
+      x: anchor.x,
+      y: anchor.y,
+      width: endAnchor.x - anchor.x,
+      height: endAnchor.y - anchor.y,
+      strokeColor: store.defaultStrokeColor,
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness: store.settings.renderMode === 'sketch' ? 1.3 : 0,
+      opacity: 1,
+      seed: Math.floor(Math.random() * 100000),
+      text: '',
+      routing: store.defaultRouting,
+      startMarker: 'none',
+      endMarker: store.defaultEndMarker,
+      startBinding: {
+        elementId: sourceEl.id,
+        side: freshHandle.side,
+        rx: freshHandle.rx,
+        ry: freshHandle.ry,
+      },
+      endBinding: {
+        elementId: newEl.id,
+        side: opp.side,
+        rx: opp.rx,
+        ry: opp.ry,
+      },
+    };
+
+    store.commitSnapshot();
+    store.setElementsLive((els) => [...els, newEl, conn]);
+    store.setSelectedIds([newEl.id]);
+    store.scheduleAutosave();
+
+    quickConnectMenuHoverRef.current = false;
+    setQuickConnectClickMenu(null);
+    setHoveredQuickConnect(null);
+    setHoveredShapeId(null);
+  }
+
+  // Active Draw.io-style quick-connect menu (click popover takes priority over hover strip)
+  const activeQcMenu =
+    activeTool === 'select' && !editingId && !draggingLabelId && !marquee && !contextMenu
+      ? quickConnectClickMenu
+        ? { mode: /** @type {const} */ ('click'), ...quickConnectClickMenu }
+        : hoveredQuickConnect
+          ? { mode: /** @type {const} */ ('hover'), ...hoveredQuickConnect }
+          : null
+      : null;
+
+  let activeQcAnchorScreen = null;
+  if (activeQcMenu) {
+    const srcEl = elements.find((item) => item.id === activeQcMenu.elementId);
+    if (srcEl && !srcEl.locked) {
+      const liveHandle =
+        getQuickConnectHandles(srcEl, camera.zoom).find(
+          (h) => h.side === activeQcMenu.side && h.localSide === activeQcMenu.handle.localSide,
+        ) || activeQcMenu.handle;
+      activeQcAnchorScreen = worldToScreen(liveHandle.x, liveHandle.y, camera);
+    }
+  }
+
   // Inline text editing overlay geometry
   const editingEl = editingId ? elements.find((e) => e.id === editingId) : null;
   let editorStyle = null;
@@ -1443,6 +1774,18 @@ export function WhiteboardCanvas() {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerLeave={() => {
+          if (hoveredLabelId) setHoveredLabelId(null);
+          if (quickConnectLeaveTimerRef.current) {
+            clearTimeout(quickConnectLeaveTimerRef.current);
+          }
+          quickConnectLeaveTimerRef.current = setTimeout(() => {
+            if (!quickConnectMenuHoverRef.current) {
+              setHoveredShapeId(null);
+              setHoveredQuickConnect(null);
+            }
+          }, 120);
+        }}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         onDragOver={(e) => {
@@ -1453,6 +1796,39 @@ export function WhiteboardCanvas() {
         style={{ cursor: cursorStyle, touchAction: 'none' }}
         className="block w-full h-full"
       />
+
+      {activeQcMenu && activeQcAnchorScreen && (
+        <QuickConnectMenu
+          mode={activeQcMenu.mode}
+          side={activeQcMenu.side}
+          anchorScreen={activeQcAnchorScreen}
+          containerWidth={canvasRef.current?.clientWidth || 800}
+          containerHeight={canvasRef.current?.clientHeight || 600}
+          theme={theme}
+          onSelectShape={(targetType) =>
+            spawnQuickConnectedShape(activeQcMenu.elementId, activeQcMenu.handle, targetType)
+          }
+          onMouseEnter={() => {
+            quickConnectMenuHoverRef.current = true;
+            if (quickConnectLeaveTimerRef.current) {
+              clearTimeout(quickConnectLeaveTimerRef.current);
+              quickConnectLeaveTimerRef.current = null;
+            }
+          }}
+          onMouseLeave={() => {
+            quickConnectMenuHoverRef.current = false;
+            if (activeQcMenu.mode === 'hover') {
+              setHoveredQuickConnect(null);
+              setHoveredShapeId(null);
+            }
+          }}
+          onClose={() => {
+            quickConnectMenuHoverRef.current = false;
+            setQuickConnectClickMenu(null);
+            setHoveredQuickConnect(null);
+          }}
+        />
+      )}
 
       {contextMenu && (
         <ShapeContextMenu
