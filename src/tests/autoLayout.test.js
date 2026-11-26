@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ElementSchema } from '../types/schema.js';
 import {
+  auditDiagramConflicts,
   layoutDiagramElements,
   orthoSegmentHitsRect,
   rectsOverlap,
   rerouteAffectedConnectors,
+  tidyDiagramElements,
 } from '../engine/autoLayout.js';
 import { getNormalizedRect, isConnectableElement } from '../engine/ports.js';
 import { computeConnectorPath } from '../engine/router.js';
@@ -292,5 +294,88 @@ P5 --> E3 : Laporan Keuangan & Aktivitas
     expect(aboveB2S?.endBinding?.side).toBe('top');
     expect(aboveS2B?.startBinding?.side).toBe('top');
     expect(aboveS2B?.endBinding?.side).toBe('bottom');
+  });
+
+  it('untangles crossed edges in full mode and preserves node positions in connectors_only mode', () => {
+    const a = createElementFromShape('dfd_gs_entity', 60, 80);
+    a.id = 'E1';
+    a.text = 'Mahasiswa';
+    const b = createElementFromShape('dfd_gs_entity', 60, 280);
+    b.id = 'E2';
+    b.text = 'Dosen';
+    const c = createElementFromShape('dfd_gs_process', 420, 80);
+    c.id = 'P1';
+    c.text = 'Validasi KRS';
+    const d = createElementFromShape('dfd_gs_process', 420, 280);
+    d.id = 'P2';
+    d.text = 'Input Nilai';
+
+    // Deliberately crossed straight wires: E1(top-left) -> P2(bottom-right) and E2(bottom-left) -> P1(top-right)
+    const c1 = {
+      id: 'c-cross-1',
+      type: 'connector',
+      x: 200,
+      y: 115,
+      width: 220,
+      height: 200,
+      strokeColor: '#0F172A',
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: /** @type {const} */ ('solid'),
+      roughness: 0,
+      opacity: 1,
+      seed: 1,
+      text: 'Pilihan mata kuliah',
+      routing: /** @type {const} */ ('elbow'),
+      startMarker: /** @type {const} */ ('none'),
+      endMarker: /** @type {const} */ ('filled_arrow'),
+      startBinding: { elementId: 'E1', side: /** @type {const} */ ('right'), rx: 1, ry: 0.5 },
+      endBinding: { elementId: 'P2', side: /** @type {const} */ ('left'), rx: 0, ry: 0.5 },
+      labelPos: { x: 310, y: 215 },
+    };
+    const c2 = {
+      id: 'c-cross-2',
+      type: 'connector',
+      x: 200,
+      y: 315,
+      width: 220,
+      height: -200,
+      strokeColor: '#0F172A',
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: /** @type {const} */ ('solid'),
+      roughness: 0,
+      opacity: 1,
+      seed: 2,
+      text: 'Persetujuan PA',
+      routing: /** @type {const} */ ('elbow'),
+      startMarker: /** @type {const} */ ('none'),
+      endMarker: /** @type {const} */ ('filled_arrow'),
+      startBinding: { elementId: 'E2', side: /** @type {const} */ ('right'), rx: 1, ry: 0.5 },
+      endBinding: { elementId: 'P1', side: /** @type {const} */ ('left'), rx: 0, ry: 0.5 },
+      labelPos: { x: 310, y: 215 },
+    };
+
+    const tangled = [a, b, c, d, c1, c2];
+    const beforeAudit = auditDiagramConflicts(tangled);
+    expect(beforeAudit.edgeCrossings).toBeGreaterThanOrEqual(1);
+    expect(beforeAudit.labelCollisions).toBeGreaterThanOrEqual(1);
+
+    // Mode 1: Full tidy eliminates crossings and label collisions while preserving all 6 elements
+    const fullRes = tidyDiagramElements(tangled, { mode: 'full' });
+    expect(fullRes.elements).toHaveLength(6);
+    expect(fullRes.metrics.after.edgeCrossings).toBe(0);
+    expect(fullRes.metrics.after.labelCollisions).toBe(0);
+    expect(fullRes.metrics.after.score).toBeLessThan(fullRes.metrics.before.score);
+
+    // Mode 2: Connectors-only locks every component at its exact original (x, y) while eliminating label overlap
+    const connOnlyRes = tidyDiagramElements(tangled, { mode: 'connectors_only' });
+    expect(connOnlyRes.elements).toHaveLength(6);
+    for (const orig of [a, b, c, d]) {
+      const kept = connOnlyRes.elements.find((el) => el.id === orig.id);
+      expect(kept?.x).toBe(orig.x);
+      expect(kept?.y).toBe(orig.y);
+    }
+    expect(connOnlyRes.metrics.after.labelCollisions).toBe(0);
   });
 });

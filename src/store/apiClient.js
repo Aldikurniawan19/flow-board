@@ -68,6 +68,12 @@ export const apiClient = {
   deleteBoard(id) {
     return requestJson(`/api/boards/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
+  tidyDiagram(elements, mode = 'full') {
+    return requestJson('/api/boards/tidy', {
+      method: 'POST',
+      body: JSON.stringify({ elements, mode }),
+    });
+  },
   listApiKeys() {
     return requestJson('/api/keys', { method: 'GET' });
   },

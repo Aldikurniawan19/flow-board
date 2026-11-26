@@ -2388,3 +2388,417 @@ export function rerouteAffectedConnectors(elements, affectedNodeIds, options = {
 
   return nextElements;
 }
+
+/**
+ * Detect strict interior crossing between two line segments.
+ * @param {Pt} a1
+ * @param {Pt} a2
+ * @param {Pt} b1
+ * @param {Pt} b2
+ * @returns {boolean}
+ */
+function segmentsStrictlyCross(a1, a2, b1, b2) {
+  if (
+    Math.max(a1.x, a2.x) <= Math.min(b1.x, b2.x) + 1 ||
+    Math.min(a1.x, a2.x) >= Math.max(b1.x, b2.x) - 1 ||
+    Math.max(a1.y, a2.y) <= Math.min(b1.y, b2.y) + 1 ||
+    Math.min(a1.y, a2.y) >= Math.max(b1.y, b2.y) - 1
+  ) {
+    return false;
+  }
+  const dx1 = a2.x - a1.x;
+  const dy1 = a2.y - a1.y;
+  const dx2 = b2.x - b1.x;
+  const dy2 = b2.y - b1.y;
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < 1e-4) return false;
+  const rx = b1.x - a1.x;
+  const ry = b1.y - a1.y;
+  const t = (rx * dy2 - ry * dx2) / denom;
+  const u = (rx * dy1 - ry * dx1) / denom;
+  return t > 0.04 && t < 0.96 && u > 0.04 && u < 0.96;
+}
+
+/**
+ * Detect collinear overlap between two axis-aligned segments on the same lane.
+ * @param {Pt} a1
+ * @param {Pt} a2
+ * @param {Pt} b1
+ * @param {Pt} b2
+ * @returns {boolean}
+ */
+function segmentsCollinearOverlap(a1, a2, b1, b2) {
+  const aHoriz = Math.abs(a1.y - a2.y) < 1.5;
+  const bHoriz = Math.abs(b1.y - b2.y) < 1.5;
+  if (aHoriz && bHoriz && Math.abs(a1.y - b1.y) <= 4) {
+    const lo = Math.max(Math.min(a1.x, a2.x), Math.min(b1.x, b2.x));
+    const hi = Math.min(Math.max(a1.x, a2.x), Math.max(b1.x, b2.x));
+    return hi - lo > 14;
+  }
+  const aVert = Math.abs(a1.x - a2.x) < 1.5;
+  const bVert = Math.abs(b1.x - b2.x) < 1.5;
+  if (aVert && bVert && Math.abs(a1.x - b1.x) <= 4) {
+    const lo = Math.max(Math.min(a1.y, a2.y), Math.min(b1.y, b2.y));
+    const hi = Math.min(Math.max(a1.y, a2.y), Math.max(b1.y, b2.y));
+    return hi - lo > 14;
+  }
+  return false;
+}
+
+/**
+ * Check if a segment passes strictly inside an obstacle rectangle (with small inner margin).
+ * @param {Pt} a
+ * @param {Pt} b
+ * @param {{ x: number, y: number, width: number, height: number }} rect
+ * @returns {boolean}
+ */
+function segmentIntersectsNodeBody(a, b, rect) {
+  const inset = 3;
+  const rx1 = rect.x + inset;
+  const ry1 = rect.y + inset;
+  const rx2 = rect.x + rect.width - inset;
+  const ry2 = rect.y + rect.height - inset;
+  if (rx2 <= rx1 || ry2 <= ry1) return false;
+
+  if (Math.max(a.x, b.x) <= rx1 || Math.min(a.x, b.x) >= rx2) return false;
+  if (Math.max(a.y, b.y) <= ry1 || Math.min(a.y, b.y) >= ry2) return false;
+
+  // Sample interior points along segment for exact hit check (handles both orthogonal & diagonal lines)
+  const steps = Math.max(4, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 14));
+  for (let i = 1; i < steps; i += 1) {
+    const t = i / steps;
+    const px = a.x + (b.x - a.x) * t;
+    const py = a.y + (b.y - a.y) * t;
+    if (px > rx1 && px < rx2 && py > ry1 && py < ry2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Check if two axis-aligned rectangles overlap.
+ * @param {{ x: number, y: number, width: number, height: number }} a
+ * @param {{ x: number, y: number, width: number, height: number }} b
+ * @returns {boolean}
+ */
+function rectsOverlapStrict(a, b) {
+  return (
+    a.x < b.x + b.width - 1 &&
+    a.x + a.width > b.x + 1 &&
+    a.y < b.y + b.height - 1 &&
+    a.y + a.height > b.y + 1
+  );
+}
+
+/**
+ * Build the polyline for any connector element using live bindings and waypoints.
+ * @param {import('../types/schema.js').BoardElement} conn
+ * @param {Map<string, import('../types/schema.js').BoardElement>} nodeById
+ * @returns {Pt[]}
+ */
+function resolveConnectorAuditPolyline(conn, nodeById) {
+  const src = conn.startBinding ? nodeById.get(conn.startBinding.elementId) : null;
+  const dst = conn.endBinding ? nodeById.get(conn.endBinding.elementId) : null;
+  const start =
+    src && conn.startBinding
+      ? resolveBindingPoint(src, conn.startBinding)
+      : { x: conn.x, y: conn.y };
+  const end =
+    dst && conn.endBinding
+      ? resolveBindingPoint(dst, conn.endBinding)
+      : { x: conn.x + conn.width, y: conn.y + conn.height };
+  if (conn.waypoints && conn.waypoints.length > 0) {
+    return [start, ...conn.waypoints, end];
+  }
+  return [start, end];
+}
+
+/**
+ * Audit layout quality and conflicts on a FlowBoard diagram:
+ * counts connector crossings, wire-through-node collisions, collinear overlaps,
+ * label collisions, total bends, and wire length.
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ */
+export function auditDiagramConflicts(elements) {
+  const nodeById = new Map(
+    elements.filter((e) => isConnectableElement(e)).map((e) => [e.id, e]),
+  );
+  const obstacles = elements
+    .filter((e) => isConnectableElement(e) && !CONTAINER_TYPES.has(e.type))
+    .map((e) => ({ id: e.id, rect: getNormalizedRect(e) }));
+  const connectors = elements.filter((e) => e.type === 'connector');
+
+  /** @type {Array<{ conn: import('../types/schema.js').BoardElement, pts: Pt[], ignoreIds: Set<string> }>} */
+  const paths = connectors.map((conn) => ({
+    conn,
+    pts: resolveConnectorAuditPolyline(conn, nodeById),
+    ignoreIds: new Set(
+      [conn.startBinding?.elementId, conn.endBinding?.elementId].filter(
+        /** @type {(v: string | undefined) => v is string} */ ((v) => Boolean(v)),
+      ),
+    ),
+  }));
+
+  let edgeCrossings = 0;
+  let segmentOverlaps = 0;
+  let nodeHits = 0;
+  let totalBends = 0;
+  let totalLength = 0;
+
+  for (let i = 0; i < paths.length; i += 1) {
+    const p = paths[i];
+    totalBends += Math.max(0, p.pts.length - 2);
+    for (let s = 0; s < p.pts.length - 1; s += 1) {
+      const a = p.pts[s];
+      const b = p.pts[s + 1];
+      totalLength += Math.hypot(b.x - a.x, b.y - a.y);
+
+      for (const obs of obstacles) {
+        if (p.ignoreIds.has(obs.id)) continue;
+        if (segmentIntersectsNodeBody(a, b, obs.rect)) {
+          nodeHits += 1;
+        }
+      }
+    }
+
+    for (let j = i + 1; j < paths.length; j += 1) {
+      const q = paths[j];
+      for (let s1 = 0; s1 < p.pts.length - 1; s1 += 1) {
+        for (let s2 = 0; s2 < q.pts.length - 1; s2 += 1) {
+          if (segmentsStrictlyCross(p.pts[s1], p.pts[s1 + 1], q.pts[s2], q.pts[s2 + 1])) {
+            edgeCrossings += 1;
+          } else if (segmentsCollinearOverlap(p.pts[s1], p.pts[s1 + 1], q.pts[s2], q.pts[s2 + 1])) {
+            segmentOverlaps += 1;
+          }
+        }
+      }
+    }
+  }
+
+  // Estimate connector label boxes and count label-vs-node & label-vs-label collisions
+  /** @type {Array<{ id: string, rect: { x: number, y: number, width: number, height: number } }>} */
+  const labelBoxes = [];
+  for (const { conn, pts } of paths) {
+    if (!conn.text || !conn.text.trim() || pts.length < 2) continue;
+    const center = conn.labelPos || pts[Math.floor(pts.length / 2)];
+    const w = Math.min(170, Math.max(36, conn.text.trim().length * 6.5 + 12));
+    const h = 22;
+    labelBoxes.push({
+      id: conn.id,
+      rect: { x: center.x - w / 2, y: center.y - h / 2, width: w, height: h },
+    });
+  }
+
+  let labelCollisions = 0;
+  for (let i = 0; i < labelBoxes.length; i += 1) {
+    for (const obs of obstacles) {
+      if (rectsOverlapStrict(labelBoxes[i].rect, obs.rect)) {
+        labelCollisions += 1;
+      }
+    }
+    for (let j = i + 1; j < labelBoxes.length; j += 1) {
+      if (rectsOverlapStrict(labelBoxes[i].rect, labelBoxes[j].rect)) {
+        labelCollisions += 1;
+      }
+    }
+  }
+
+  const score =
+    nodeHits * 1000 +
+    segmentOverlaps * 600 +
+    edgeCrossings * 300 +
+    labelCollisions * 150 +
+    totalBends * 12 +
+    Math.round(totalLength / 80);
+
+  return {
+    edgeCrossings,
+    nodeHits,
+    segmentOverlaps,
+    labelCollisions,
+    totalBends,
+    totalLength: Math.round(totalLength),
+    score,
+  };
+}
+
+/**
+ * Infer diagram standard kind from element types so full tidy preserves semantic layout conventions.
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ * @returns {string}
+ */
+function inferDiagramKindFromElements(elements) {
+  if (elements.some((e) => e.type.startsWith('dfd_'))) return 'dfd';
+  if (elements.some((e) => e.type.startsWith('erd_chen_'))) return 'erd_chen';
+  if (elements.some((e) => e.type === 'erd_table' || e.type === 'erd_weak_table')) return 'erd';
+  if (elements.some((e) => e.type === 'uml_usecase' || e.type === 'uml_actor')) return 'usecase';
+  if (elements.some((e) => e.type === 'uml_class' || e.type === 'uml_interface')) return 'class';
+  if (elements.some((e) => e.type.startsWith('fc_') || e.type.startsWith('bpmn_'))) return 'flowchart';
+  return 'generic';
+}
+
+/**
+ * Group movable nodes into visual columns (for LR) or rows (for TB) and perform
+ * adjacent-pair slot swaps to further reduce connector crossings and bends.
+ * @param {import('../types/schema.js').BoardElement[]} candidate
+ * @param {'LR' | 'TB'} direction
+ */
+function optimizeLayerSwaps(candidate, direction) {
+  let bestElements = candidate;
+  let bestAudit = auditDiagramConflicts(bestElements);
+  if (bestAudit.edgeCrossings === 0 && bestAudit.nodeHits === 0 && bestAudit.segmentOverlaps === 0) {
+    return { elements: bestElements, audit: bestAudit };
+  }
+
+  const movable = bestElements.filter(
+    (e) => isConnectableElement(e) && !CONTAINER_TYPES.has(e.type) && !e.locked,
+  );
+  if (movable.length < 2 || movable.length > 26) {
+    return { elements: bestElements, audit: bestAudit };
+  }
+
+  // Bucket nodes into same visual column (LR) or row (TB) within 70px band
+  /** @type {Array<string[]>} */
+  const groups = [];
+  const sorted = [...movable].sort((a, b) =>
+    direction === 'LR' ? a.x - b.x || a.y - b.y : a.y - b.y || a.x - b.x,
+  );
+  for (const node of sorted) {
+    const primaryCoord = direction === 'LR' ? node.x + node.width / 2 : node.y + node.height / 2;
+    const match = groups.find((ids) => {
+      const first = bestElements.find((el) => el.id === ids[0]);
+      if (!first) return false;
+      const firstCoord = direction === 'LR' ? first.x + first.width / 2 : first.y + first.height / 2;
+      return Math.abs(primaryCoord - firstCoord) <= 75;
+    });
+    if (match) match.push(node.id);
+    else groups.push([node.id]);
+  }
+
+  let attempts = 0;
+  const maxAttempts = 18;
+  for (const group of groups) {
+    if (group.length < 2 || group.length > 7) continue;
+    for (let i = 0; i < group.length - 1 && attempts < maxAttempts; i += 1) {
+      for (let j = i + 1; j < group.length && attempts < maxAttempts; j += 1) {
+        attempts += 1;
+        const trial = bestElements.map((el) => structuredClone(el));
+        const nA = trial.find((el) => el.id === group[i]);
+        const nB = trial.find((el) => el.id === group[j]);
+        if (!nA || !nB) continue;
+
+        // Swap slot centers so differently sized boxes stay centered on their swapped slots
+        const aCx = nA.x + nA.width / 2;
+        const aCy = nA.y + nA.height / 2;
+        const bCx = nB.x + nB.width / 2;
+        const bCy = nB.y + nB.height / 2;
+        nA.x = Math.round(bCx - nA.width / 2);
+        nA.y = Math.round(bCy - nA.height / 2);
+        nB.x = Math.round(aCx - nB.width / 2);
+        nB.y = Math.round(aCy - nB.height / 2);
+
+        const routed = routeConnectorsCleanly(trial, { direction });
+        const trialAudit = auditDiagramConflicts(routed);
+        if (trialAudit.score < bestAudit.score) {
+          bestElements = routed;
+          bestAudit = trialAudit;
+          if (
+            bestAudit.edgeCrossings === 0 &&
+            bestAudit.nodeHits === 0 &&
+            bestAudit.segmentOverlaps === 0
+          ) {
+            return { elements: bestElements, audit: bestAudit };
+          }
+        }
+      }
+    }
+  }
+
+  return { elements: bestElements, audit: bestAudit };
+}
+
+/**
+ * Pro Conflict-Driven Diagram Tidy Optimizer:
+ * Preserves 100% of every component, connector, text, and data flow semantics while
+ * eliminating wire/node collisions, collinear overlaps, unnecessary crossings, and label overlaps.
+ *
+ * Modes:
+ * - `'full'`: Re-optimizes component placement, layer ordering, port assignment, orthogonal lanes, and labels.
+ * - `'connectors_only'`: Locks all component positions in place and optimizes only connector ports, lanes, and labels.
+ *
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ * @param {{ mode?: 'full' | 'connectors_only' }} [options]
+ */
+export function tidyDiagramElements(elements, options = {}) {
+  const mode = options.mode === 'connectors_only' ? 'connectors_only' : 'full';
+  const before = auditDiagramConflicts(elements);
+  if (elements.length === 0) {
+    return {
+      elements: [],
+      metrics: { mode, before, after: before },
+    };
+  }
+
+  const resetUnlockedConnectors = (/** @type {import('../types/schema.js').BoardElement[]} */ els) =>
+    els.map((el) => {
+      const copy = structuredClone(el);
+      if (copy.type === 'connector' && !copy.locked) {
+        copy.waypoints = undefined;
+        copy.labelPos = null;
+      }
+      return copy;
+    });
+
+  if (mode === 'connectors_only') {
+    const cleanBase = resetUnlockedConnectors(elements);
+    const unlockedNodeIds = new Set(
+      cleanBase.filter((e) => isConnectableElement(e)).map((e) => e.id),
+    );
+    const candidates = [
+      routeConnectorsCleanly(cleanBase, { direction: 'LR' }),
+      routeConnectorsCleanly(cleanBase, { direction: 'TB' }),
+      rerouteAffectedConnectors(cleanBase, unlockedNodeIds, { fast: false }),
+    ];
+
+    let bestEls = candidates[0];
+    let bestAudit = auditDiagramConflicts(bestEls);
+    for (let i = 1; i < candidates.length; i += 1) {
+      const audit = auditDiagramConflicts(candidates[i]);
+      if (audit.score < bestAudit.score) {
+        bestEls = candidates[i];
+        bestAudit = audit;
+      }
+    }
+
+    return {
+      elements: bestEls,
+      metrics: { mode, before, after: bestAudit },
+    };
+  }
+
+  // Full mode: evaluate LR and TB layouts + adjacent-layer crossing-minimization swaps
+  const kind = inferDiagramKindFromElements(elements);
+  const baseReset = resetUnlockedConnectors(elements);
+
+  const lrRaw = layoutDiagramElements(baseReset, { direction: 'LR', kind });
+  const lrOpt = optimizeLayerSwaps(lrRaw, 'LR');
+
+  let bestEls = lrOpt.elements;
+  let bestAudit = lrOpt.audit;
+
+  // Also evaluate TB orientation for flowcharts/ERD/UML/generic diagrams where vertical flow may yield fewer crossings
+  if (kind !== 'usecase') {
+    const tbRaw = layoutDiagramElements(baseReset, { direction: 'TB', kind });
+    const tbOpt = optimizeLayerSwaps(tbRaw, 'TB');
+    if (tbOpt.audit.score < bestAudit.score) {
+      bestEls = tbOpt.elements;
+      bestAudit = tbOpt.audit;
+    }
+  }
+
+  return {
+    elements: bestEls,
+    metrics: { mode, before, after: bestAudit },
+  };
+}

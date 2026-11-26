@@ -175,6 +175,20 @@ describe('Auth & Boards API (Happy path, validation, & anti-IDOR security)', () 
       expect(freeKeyAttempt.status).toBe(403);
       expect(freeKeyAttempt.body.code).toBe('PRO_REQUIRED');
 
+      // Free user & unauthenticated callers are strictly blocked from Pro tidy endpoint
+      const unauthTidy = await request(app).post('/api/boards/tidy').set(CSRF).send({
+        mode: 'full',
+        elements: [],
+      });
+      expect(unauthTidy.status).toBe(401);
+
+      const freeTidy = await agentFree.post('/api/boards/tidy').set(CSRF).send({
+        mode: 'full',
+        elements: [],
+      });
+      expect(freeTidy.status).toBe(403);
+      expect(freeTidy.body.code).toBe('PRO_REQUIRED');
+
       const freeDraftAttempt = await agentFree.post('/api/public/drafts').send({
         title: 'Blocked Draft',
         code: '@startuml\nentity A {\n* id <<PK>>\n}\n@enduml',
@@ -305,6 +319,22 @@ P1 --> D1 : Simpan Resi
       expect(boardCheckA.status).toBe(200);
       expect(boardCheckA.body.board.title).toBe('DFD Pengiriman AI');
       expect(boardCheckA.body.board.elements.length).toBeGreaterThanOrEqual(5);
+
+      // Owner A can run Pro tidy diagram endpoint in both full and connectors_only modes
+      const tidyFull = await agentA.post('/api/boards/tidy').set(CSRF).send({
+        mode: 'full',
+        elements: boardCheckA.body.board.elements,
+      });
+      expect(tidyFull.status).toBe(200);
+      expect(tidyFull.body.elements).toHaveLength(boardCheckA.body.board.elements.length);
+      expect(tidyFull.body.metrics.mode).toBe('full');
+
+      const tidyConnOnly = await agentA.post('/api/boards/tidy').set(CSRF).send({
+        mode: 'connectors_only',
+        elements: boardCheckA.body.board.elements,
+      });
+      expect(tidyConnOnly.status).toBe(200);
+      expect(tidyConnOnly.body.metrics.mode).toBe('connectors_only');
 
       // Pro User B's API key CANNOT read or delete Owner A's board via MCP (anti-IDOR)
       const idorMcpGet = await request(app)

@@ -134,6 +134,7 @@ export const useBoardStore = create((set, get) => ({
   boardLoadError: '',
   /** @type {'saved' | 'saving' | 'dirty' | 'error'} */
   saveStatus: 'saved',
+  tidyingDiagram: false,
   /** @type {{ type: 'success' | 'error' | 'info', message: string } | null} */
   feedback: null,
 
@@ -312,6 +313,97 @@ export const useBoardStore = create((set, get) => ({
   },
 
   clearAiUpgradeRequest: () => set({ aiUpgradeRequested: false }),
+
+  /**
+   * Run Pro-only conflict-driven diagram tidy optimization via server endpoint (`POST /api/boards/tidy`).
+   * Free accounts are routed straight to the FlowBoard Pro upgrade modal.
+   * @param {'full' | 'connectors_only'} [mode]
+   */
+  tidyActiveBoard: async (mode = 'full') => {
+    const { user, elements, tidyingDiagram } = get();
+    if (tidyingDiagram) return;
+
+    if (!user?.hasAiAccess) {
+      set({
+        aiUpgradeRequested: true,
+        feedback: {
+          type: 'info',
+          message: 'Fitur Rapikan Diagram Otomatis khusus untuk akun FlowBoard Pro.',
+        },
+      });
+      return;
+    }
+
+    if (elements.length === 0) {
+      set({
+        feedback: {
+          type: 'info',
+          message: 'Kanvas masih kosong — tambahkan atau generate diagram terlebih dahulu.',
+        },
+      });
+      return;
+    }
+
+    set({ tidyingDiagram: true });
+    try {
+      const res = await apiClient.tidyDiagram(elements, mode);
+      const nextElements = Array.isArray(res?.elements) ? res.elements : elements;
+      const before = res?.metrics?.before;
+      const after = res?.metrics?.after;
+
+      const beforeConflicts =
+        (before?.nodeHits || 0) + (before?.segmentOverlaps || 0) + (before?.labelCollisions || 0);
+      const afterConflicts =
+        (after?.nodeHits || 0) + (after?.segmentOverlaps || 0) + (after?.labelCollisions || 0);
+      const modeLabel = mode === 'connectors_only' ? 'Garis & label dirapikan' : 'Diagram dirapikan penuh';
+
+      const detailParts = [];
+      if (typeof before?.edgeCrossings === 'number' && typeof after?.edgeCrossings === 'number') {
+        detailParts.push(`Persilangan: ${before.edgeCrossings} → ${after.edgeCrossings}`);
+      }
+      if (beforeConflicts > 0 || afterConflicts > 0) {
+        detailParts.push(`Bentrok: ${beforeConflicts} → ${afterConflicts}`);
+      }
+      const summary =
+        detailParts.length > 0
+          ? `${modeLabel} (${detailParts.join(', ')}). Tekan Ctrl+Z untuk batal.`
+          : `${modeLabel}. Tekan Ctrl+Z untuk batal.`;
+
+      set((state) => ({
+        past: appendHistory(state.past, state.elements),
+        future: [],
+        elements: nextElements,
+        selectedIds: [],
+        editingId: null,
+        tidyingDiagram: false,
+        ...(mode === 'full' && nextElements.length > 0
+          ? { camera: computeFitCamera(nextElements) }
+          : {}),
+        feedback: { type: 'success', message: summary },
+      }));
+      get().scheduleAutosave();
+    } catch (err) {
+      const status = /** @type {{ status?: number }} */ (err)?.status;
+      if (status === 403) {
+        set({
+          tidyingDiagram: false,
+          aiUpgradeRequested: true,
+          feedback: {
+            type: 'info',
+            message: 'Fitur Rapikan Diagram Otomatis khusus untuk akun FlowBoard Pro.',
+          },
+        });
+        return;
+      }
+      set({
+        tidyingDiagram: false,
+        feedback: {
+          type: 'error',
+          message: /** @type {Error} */ (err)?.message || 'Gagal merapikan diagram.',
+        },
+      });
+    }
+  },
 
   /**
    * Process an incoming AI deep-link (`planttext` or `draft`) ONLY if the authenticated user

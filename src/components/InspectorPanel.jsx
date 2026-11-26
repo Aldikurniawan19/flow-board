@@ -5,13 +5,17 @@ import {
   ArrowUpToLine,
   ClipboardPaste,
   Copy,
+  Crown,
+  GitBranch,
   Link2,
+  Loader2,
   Lock,
   PanelRightClose,
   PanelRightOpen,
   Plus,
   RotateCcw,
   RotateCw,
+  Sparkles,
   Trash2,
   Unlink2,
   Unlock,
@@ -107,6 +111,8 @@ export function InspectorPanel({ open, onToggle }) {
   );
 
   const elements = useBoardStore((s) => s.elements);
+  const user = useBoardStore((s) => s.user);
+  const tidyingDiagram = useBoardStore((s) => s.tidyingDiagram);
   const selectedIds = useBoardStore((s) => s.selectedIds);
   const settings = useBoardStore((s) => s.settings);
   const defaultStrokeColor = useBoardStore((s) => s.defaultStrokeColor);
@@ -125,6 +131,8 @@ export function InspectorPanel({ open, onToggle }) {
   const setFeedback = useBoardStore((s) => s.setFeedback);
   const updateSettings = useBoardStore((s) => s.updateSettings);
   const autoLayoutBoard = useBoardStore((s) => s.autoLayoutBoard);
+  const tidyActiveBoard = useBoardStore((s) => s.tidyActiveBoard);
+  const hasAiAccess = Boolean(user?.hasAiAccess);
 
   if (!open) {
     return (
@@ -468,6 +476,59 @@ export function InspectorPanel({ open, onToggle }) {
                     className="py-1.5 px-2 rounded-lg border border-[#E2E8F0] text-[#0F172A] hover:bg-[#F1F5F9] disabled:opacity-40 font-medium"
                   >
                     Atas → Bawah
+                  </button>
+                </div>
+
+                {/* Pro 2-Mode Anti-Conflict Tidy Optimizer */}
+                <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-[#0F172A]">
+                      Optimasi Anti-Bentrok
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                        hasAiAccess
+                          ? 'bg-[#DCFCE7] text-[#15803D]'
+                          : 'bg-[#FEE2E2] text-[#B91C1C]'
+                      }`}
+                    >
+                      <Crown className="h-2.5 w-2.5" strokeWidth={2} aria-hidden="true" />
+                      {hasAiAccess ? 'Pro' : 'Pro'}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={tidyingDiagram || (hasAiAccess && elements.length === 0)}
+                    onClick={() => tidyActiveBoard('full')}
+                    title={
+                      hasAiAccess
+                        ? 'Tata ulang komponen, port, jalur garis & label agar minim persilangan'
+                        : 'Fitur FlowBoard Pro — klik untuk melihat paket Pro'
+                    }
+                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1D4ED8] px-2.5 py-1.5 text-xs font-medium text-white hover:bg-[#1E40AF] disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+                  >
+                    {tidyingDiagram ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} aria-hidden="true" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                    )}
+                    <span>Rapikan Penuh</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={tidyingDiagram || (hasAiAccess && elements.length === 0)}
+                    onClick={() => tidyActiveBoard('connectors_only')}
+                    title={
+                      hasAiAccess
+                        ? 'Kunci posisi komponen, luruskan konektor & pisahkan label bertumpuk'
+                        : 'Fitur FlowBoard Pro — klik untuk melihat paket Pro'
+                    }
+                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs font-medium text-[#0F172A] hover:bg-[#F1F5F9] disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+                  >
+                    <GitBranch className="h-3.5 w-3.5 text-[#15803D]" strokeWidth={1.75} aria-hidden="true" />
+                    <span>Rapikan Garis &amp; Label Saja</span>
                   </button>
                 </div>
               </div>

@@ -987,4 +987,111 @@ p "1" -- "N" t : "MELAKUKAN"
     const resetConn = useBoardStore.getState().elements.find((el) => el.id === 'c-flow-1');
     expect(resetConn?.labelPos).toBeNull();
   });
+
+  it('gates Rapikan Diagram Otomatis to Pro/Owner accounts and runs 2-mode tidy for Pro users', async () => {
+    vi.spyOn(apiClient, 'getMe').mockResolvedValue({
+      user: {
+        id: 'u1',
+        name: 'Rina Free',
+        email: 'rina@example.com',
+        plan: 'free',
+        isOwner: false,
+        hasAiAccess: false,
+      },
+    });
+    vi.spyOn(apiClient, 'listBoards').mockResolvedValue({
+      boards: [{ id: 'b1', title: 'DFD KRS', createdAt: '', updatedAt: '' }],
+    });
+    const sampleElements = [
+      {
+        id: 'n1',
+        type: 'dfd_gs_entity',
+        x: 60,
+        y: 80,
+        width: 140,
+        height: 70,
+        strokeColor: '#0F172A',
+        fillColor: '#FFFFFF',
+        strokeWidth: 2,
+        strokeStyle: 'solid',
+        roughness: 0,
+        opacity: 1,
+        seed: 1,
+        text: 'Mahasiswa',
+      },
+      {
+        id: 'n2',
+        type: 'dfd_gs_process',
+        x: 340,
+        y: 80,
+        width: 160,
+        height: 96,
+        strokeColor: '#0F172A',
+        fillColor: '#DBEAFE',
+        strokeWidth: 2,
+        strokeStyle: 'solid',
+        roughness: 0,
+        opacity: 1,
+        seed: 2,
+        text: 'Proses KRS',
+      },
+    ];
+    vi.spyOn(apiClient, 'getBoard').mockResolvedValue({
+      board: {
+        id: 'b1',
+        title: 'DFD KRS',
+        settings: { renderMode: 'clean', gridMode: 'dots', snapToGrid: true },
+        elements: sampleElements,
+      },
+    });
+    vi.spyOn(apiClient, 'updateBoard').mockResolvedValue({
+      board: { id: 'b1', title: 'DFD KRS', updatedAt: '' },
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => {
+      expect(useBoardStore.getState().elements).toHaveLength(2);
+    });
+
+    // 1. Free user clicking "Rapikan Penuh" in the sidebar "Rapikan Tata Letak" section opens the Pro upgrade paywall
+    const fullTidyBtn = screen.getByRole('button', { name: 'Rapikan Penuh' });
+    expect(screen.getByRole('button', { name: 'Rapikan Garis & Label Saja' })).toBeInTheDocument();
+    await user.click(fullTidyBtn);
+    expect(
+      await screen.findByRole('heading', { name: /Integrasi AI & MCP — FlowBoard Pro/i }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Tutup dialog integrasi AI' }));
+
+    // 2. Pro / Owner user runs "Rapikan Penuh" from the sidebar "Rapikan Tata Letak" section
+    act(() => {
+      useBoardStore.setState({
+        user: {
+          id: 'u1',
+          name: 'Aldi Owner',
+          email: 'owner@example.com',
+          plan: 'pro',
+          isOwner: true,
+          hasAiAccess: true,
+        },
+      });
+    });
+
+    const tidySpy = vi.spyOn(apiClient, 'tidyDiagram').mockResolvedValue({
+      elements: sampleElements.map((el) => ({ ...el, x: el.x + 20 })),
+      metrics: {
+        mode: 'full',
+        before: { edgeCrossings: 2, nodeHits: 1, segmentOverlaps: 0, labelCollisions: 1 },
+        after: { edgeCrossings: 0, nodeHits: 0, segmentOverlaps: 0, labelCollisions: 0 },
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Rapikan Penuh' }));
+
+    await waitFor(() => {
+      expect(tidySpy).toHaveBeenCalledWith(sampleElements, 'full');
+      expect(useBoardStore.getState().elements[0].x).toBe(80);
+      expect(useBoardStore.getState().feedback?.message).toContain('Persilangan: 2 → 0');
+    });
+  });
 });

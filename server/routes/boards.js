@@ -1,11 +1,19 @@
 import crypto from 'node:crypto';
 import express from 'express';
+import { z } from 'zod';
 import {
   BoardSettingsSchema,
   CreateBoardSchema,
+  ElementSchema,
   UpdateBoardSchema,
 } from '../../src/types/schema.js';
-import { createRequireAuth } from '../middleware/auth.js';
+import { tidyDiagramElements } from '../../src/engine/autoLayout.js';
+import { createRequireAuth, requireAiAccess } from '../middleware/auth.js';
+
+const TidyDiagramSchema = z.object({
+  mode: z.enum(['full', 'connectors_only']).default('full'),
+  elements: z.array(ElementSchema).max(5000),
+});
 
 /** @type {import('../../src/types/schema.js').BoardSettings} */
 const DEFAULT_SETTINGS = {
@@ -121,6 +129,25 @@ export function createBoardsRouter(db) {
           updatedAt: now,
         },
       });
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  // Pro-gated conflict-driven diagram tidy optimizer (Full layout or Connectors & Labels only)
+  router.post('/tidy', requireAiAccess, async (req, res, next) => {
+    try {
+      const parsed = TidyDiagramSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: parsed.error.issues[0]?.message || 'Data diagram tidak valid untuk dirapikan.',
+        });
+      }
+      const elements = /** @type {import('../../src/types/schema.js').BoardElement[]} */ (
+        parsed.data.elements
+      );
+      const result = tidyDiagramElements(elements, { mode: parsed.data.mode });
+      return res.status(200).json(result);
     } catch (err) {
       return next(err);
     }

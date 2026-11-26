@@ -35,10 +35,10 @@ const PRO_PLANS = [
     badge: 'Promo 30%',
     description: 'Fleksibel untuk tugas akhir, proyek kuliah, atau sprint desain cepat.',
     perks: [
-      'Remote MCP Server untuk Claude, Cursor & Antigravity',
-      'API Key pribadi & OpenAPI Spec (ChatGPT Custom GPT)',
-      'Impor langsung dari Tautan AI (Deep-Link & Draf)',
-      'Generate DFD, ERD Crow Foot & Peter Chen anti-tumpuk',
+      'Remote MCP Server untuk Claude, Cursor, ChatGPT & Gemini',
+      'API Key pribadi, OAuth 2.1 1-Klik & OpenAPI Spec',
+      'Rapikan Diagram Otomatis (Anti-Bentrok Garis & Label)',
+      'Impor langsung dari Tautan AI & Generate DFD/ERD/UML',
     ],
   },
   {
