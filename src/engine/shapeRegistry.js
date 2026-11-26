@@ -22,10 +22,12 @@ import { getNormalizedRect } from './ports.js';
 /** @type {ShapeCategory[]} */
 export const SHAPE_CATEGORIES = [
   { id: 'basic', label: 'Dasar & Papan Tulis' },
+  { id: 'rich_picture', label: 'Rich Picture (SSM)' },
   { id: 'flowchart', label: 'Flowchart & Workflow' },
+  { id: 'bpmn', label: 'BPMN 2.0 (Proses Bisnis)' },
   { id: 'dfd', label: 'DFD (Data Flow)' },
   { id: 'erd', label: 'ERD (Basis Data)' },
-  { id: 'uml', label: 'UML (Perangkat Lunak)' },
+  { id: 'uml', label: 'UML 2.5 (Perangkat Lunak)' },
   { id: 'arch', label: 'Arsitektur Sistem' },
 ];
 
@@ -119,6 +121,172 @@ export const SHAPE_DEFINITIONS = [
     preview: [
       { kind: 'rect', props: { x: 4, y: 6, width: 32, height: 22, strokeDasharray: '3 2' } },
       { kind: 'rect', props: { x: 4, y: 3, width: 14, height: 5 } },
+    ],
+  },
+
+  // 1B. Rich Picture (Soft Systems Methodology — Checkland)
+  {
+    type: 'rp_stakeholder',
+    label: 'Stakeholder / Aktor',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'stakeholder', 'orang', 'aktor', 'pengguna', 'checkland'],
+    defaultWidth: 96,
+    defaultHeight: 116,
+    defaultText: 'Stakeholder',
+    defaultFill: '#DBEAFE',
+    preview: [
+      { kind: 'circle', props: { cx: 20, cy: 8, r: 4 } },
+      { kind: 'path', props: { d: 'M 11 26 C 11 18, 29 18, 29 26 Z' } },
+    ],
+  },
+  {
+    type: 'rp_group',
+    label: 'Kelompok / Tim',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'group', 'tim', 'divisi', 'departemen', 'komunitas'],
+    defaultWidth: 136,
+    defaultHeight: 108,
+    defaultText: 'Tim / Divisi',
+    defaultFill: '#DBEAFE',
+    preview: [
+      { kind: 'circle', props: { cx: 20, cy: 8, r: 3.5 } },
+      { kind: 'circle', props: { cx: 11, cy: 11, r: 3 } },
+      { kind: 'circle', props: { cx: 29, cy: 11, r: 3 } },
+      { kind: 'path', props: { d: 'M 13 26 C 13 18, 27 18, 27 26 Z' } },
+      { kind: 'path', props: { d: 'M 5 26 C 5 20, 14 20, 15 24' } },
+      { kind: 'path', props: { d: 'M 35 26 C 35 20, 26 20, 25 24' } },
+    ],
+  },
+  {
+    type: 'rp_thought',
+    label: 'Balon Pikiran (Concern)',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'thought', 'pikiran', 'concern', 'asumsi', 'kekhawatiran'],
+    defaultWidth: 176,
+    defaultHeight: 112,
+    defaultText: 'Apakah proses ini lambat?',
+    defaultFill: '#FEF3C7',
+    preview: [
+      {
+        kind: 'path',
+        props: {
+          d: 'M 11 21 H 29 A 5 5 0 0 0 31 11 A 7 7 0 0 0 18 7 A 6 6 0 0 0 9 12 A 5 5 0 0 0 11 21 Z',
+        },
+      },
+      { kind: 'circle', props: { cx: 11, cy: 25, r: 2 } },
+      { kind: 'circle', props: { cx: 7, cy: 28, r: 1.2 } },
+    ],
+  },
+  {
+    type: 'rp_speech',
+    label: 'Balon Ucapan (Keluhan)',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'speech', 'ucapan', 'keluhan', 'pernyataan', 'komentar'],
+    defaultWidth: 172,
+    defaultHeight: 102,
+    defaultText: '"Antrean terlalu lama!"',
+    defaultFill: '#FFFFFF',
+    preview: [
+      {
+        kind: 'path',
+        props: { d: 'M 6 6 H 34 V 21 H 17 L 10 27 V 21 H 6 Z' },
+      },
+    ],
+  },
+  {
+    type: 'rp_conflict',
+    label: 'Konflik (Pedang Silang)',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'konflik', 'conflict', 'pedang', 'crossed swords', 'benturan'],
+    defaultWidth: 104,
+    defaultHeight: 104,
+    defaultText: 'Konflik',
+    defaultFill: '#FEE2E2',
+    defaultStroke: '#B91C1C',
+    preview: [
+      { kind: 'line', props: { x1: 9, y1: 6, x2: 31, y2: 26 } },
+      { kind: 'line', props: { x1: 31, y1: 6, x2: 9, y2: 26 } },
+      { kind: 'line', props: { x1: 11, y1: 20, x2: 17, y2: 25 } },
+      { kind: 'line', props: { x1: 29, y1: 20, x2: 23, y2: 25 } },
+    ],
+  },
+  {
+    type: 'rp_eye',
+    label: 'Pengawasan / Sudut Pandang',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'eye', 'mata', 'audit', 'monitoring', 'pengawasan', 'perspektif'],
+    defaultWidth: 132,
+    defaultHeight: 92,
+    defaultText: 'Pengawasan',
+    defaultFill: '#FFFFFF',
+    preview: [
+      { kind: 'path', props: { d: 'M 4 16 Q 20 4 36 16 Q 20 28 4 16 Z' } },
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 4.5 } },
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 1.8, fill: 'currentColor' } },
+    ],
+  },
+  {
+    type: 'rp_crisis',
+    label: 'Krisis / Masalah (Petir)',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'crisis', 'krisis', 'masalah', 'petir', 'lightning', 'bottleneck'],
+    defaultWidth: 104,
+    defaultHeight: 110,
+    defaultText: 'Bottleneck',
+    defaultFill: '#FEF3C7',
+    defaultStroke: '#B45309',
+    preview: [
+      { kind: 'polygon', props: { points: '23,4 11,17 19,17 16,28 29,14 21,14' } },
+    ],
+  },
+  {
+    type: 'rp_organization',
+    label: 'Instansi / Gedung',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'building', 'gedung', 'instansi', 'kantor', 'perusahaan', 'organisasi'],
+    defaultWidth: 136,
+    defaultHeight: 116,
+    defaultText: 'Kantor Pusat',
+    defaultFill: '#F1F5F9',
+    preview: [
+      { kind: 'rect', props: { x: 8, y: 5, width: 24, height: 23 } },
+      { kind: 'rect', props: { x: 12, y: 9, width: 4, height: 4 } },
+      { kind: 'rect', props: { x: 24, y: 9, width: 4, height: 4 } },
+      { kind: 'rect', props: { x: 12, y: 16, width: 4, height: 4 } },
+      { kind: 'rect', props: { x: 24, y: 16, width: 4, height: 4 } },
+      { kind: 'rect', props: { x: 17, y: 21, width: 6, height: 7 } },
+    ],
+  },
+  {
+    type: 'rp_money',
+    label: 'Anggaran / Biaya',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'money', 'uang', 'biaya', 'budget', 'anggaran', 'finansial'],
+    defaultWidth: 104,
+    defaultHeight: 104,
+    defaultText: 'Anggaran',
+    defaultFill: '#DCFCE7',
+    defaultStroke: '#15803D',
+    preview: [
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 11 } },
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 7.5 } },
+      { kind: 'line', props: { x1: 20, y1: 11, x2: 20, y2: 21 } },
+    ],
+  },
+  {
+    type: 'rp_document_stack',
+    label: 'Arsip / Dokumen Fisik',
+    category: 'rich_picture',
+    keywords: ['rich picture', 'ssm', 'arsip', 'berkas', 'dokumen', 'paperwork', 'formulir', 'sop'],
+    defaultWidth: 136,
+    defaultHeight: 102,
+    defaultText: 'Berkas Manual',
+    defaultFill: '#FFFFFF',
+    preview: [
+      { kind: 'rect', props: { x: 11, y: 4, width: 22, height: 20 } },
+      { kind: 'rect', props: { x: 7, y: 8, width: 22, height: 20 } },
+      { kind: 'line', props: { x1: 11, y1: 14, x2: 24, y2: 14 } },
+      { kind: 'line', props: { x1: 11, y1: 19, x2: 21, y2: 19 } },
     ],
   },
 
@@ -231,6 +399,132 @@ export const SHAPE_DEFINITIONS = [
     defaultHeight: 84,
     defaultText: 'A',
     preview: [{ kind: 'polygon', props: { points: '8,5 32,5 32,19 20,28 8,19' } }],
+  },
+
+  // 2B. BPMN 2.0 (OMG ISO/IEC 19510)
+  {
+    type: 'bpmn_start',
+    label: 'Start Event (BPMN)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'start', 'event', 'mulai', 'iso 19510'],
+    defaultWidth: 64,
+    defaultHeight: 64,
+    defaultText: 'Mulai',
+    defaultFill: '#DCFCE7',
+    defaultStroke: '#15803D',
+    preview: [{ kind: 'circle', props: { cx: 20, cy: 16, r: 10 } }],
+  },
+  {
+    type: 'bpmn_intermediate',
+    label: 'Intermediate Event (BPMN)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'intermediate', 'event', 'peristiwa', 'tengah'],
+    defaultWidth: 68,
+    defaultHeight: 68,
+    defaultText: 'Event',
+    defaultFill: '#FEF3C7',
+    defaultStroke: '#B45309',
+    preview: [
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 11 } },
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 8 } },
+    ],
+  },
+  {
+    type: 'bpmn_end',
+    label: 'End Event (BPMN)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'end', 'event', 'selesai', 'akhir'],
+    defaultWidth: 64,
+    defaultHeight: 64,
+    defaultText: 'Selesai',
+    defaultFill: '#FEE2E2',
+    defaultStroke: '#B91C1C',
+    preview: [{ kind: 'circle', props: { cx: 20, cy: 16, r: 10, strokeWidth: 3 } }],
+  },
+  {
+    type: 'bpmn_task',
+    label: 'Task / Aktivitas (BPMN)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'task', 'aktivitas', 'activity', 'tugas'],
+    defaultWidth: 164,
+    defaultHeight: 80,
+    defaultText: 'Verifikasi Pesanan',
+    defaultFill: '#DBEAFE',
+    preview: [{ kind: 'rect', props: { x: 4, y: 6, width: 32, height: 20, rx: 5 } }],
+  },
+  {
+    type: 'bpmn_subprocess',
+    label: 'Sub-Proses (BPMN)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'subprocess', 'sub-proses', 'collapsed'],
+    defaultWidth: 168,
+    defaultHeight: 84,
+    defaultText: 'Proses Pembayaran',
+    defaultFill: '#DBEAFE',
+    preview: [
+      { kind: 'rect', props: { x: 4, y: 5, width: 32, height: 22, rx: 5 } },
+      { kind: 'rect', props: { x: 16, y: 19, width: 8, height: 8 } },
+      { kind: 'line', props: { x1: 20, y1: 21, x2: 20, y2: 25 } },
+      { kind: 'line', props: { x1: 18, y1: 23, x2: 22, y2: 23 } },
+    ],
+  },
+  {
+    type: 'bpmn_gateway_xor',
+    label: 'Gateway Eksklusif (XOR)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'gateway', 'xor', 'exclusive', 'keputusan', 'cabang'],
+    defaultWidth: 84,
+    defaultHeight: 84,
+    defaultText: '',
+    defaultFill: '#FEF3C7',
+    preview: [
+      { kind: 'polygon', props: { points: '20,3 35,16 20,29 5,16' } },
+      { kind: 'line', props: { x1: 16, y1: 12, x2: 24, y2: 20 } },
+      { kind: 'line', props: { x1: 24, y1: 12, x2: 16, y2: 20 } },
+    ],
+  },
+  {
+    type: 'bpmn_gateway_and',
+    label: 'Gateway Paralel (AND)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'gateway', 'and', 'parallel', 'paralel', 'plus'],
+    defaultWidth: 84,
+    defaultHeight: 84,
+    defaultText: '',
+    defaultFill: '#FEF3C7',
+    preview: [
+      { kind: 'polygon', props: { points: '20,3 35,16 20,29 5,16' } },
+      { kind: 'line', props: { x1: 20, y1: 10, x2: 20, y2: 22 } },
+      { kind: 'line', props: { x1: 14, y1: 16, x2: 26, y2: 16 } },
+    ],
+  },
+  {
+    type: 'bpmn_data_object',
+    label: 'Data Object (BPMN)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'data object', 'dokumen', 'file', 'artifact'],
+    defaultWidth: 96,
+    defaultHeight: 112,
+    defaultText: 'Data Invoice',
+    defaultFill: '#FFFFFF',
+    preview: [
+      { kind: 'path', props: { d: 'M 10 4 H 24 L 30 10 V 28 H 10 Z' } },
+      { kind: 'path', props: { d: 'M 24 4 V 10 H 30' } },
+    ],
+  },
+  {
+    type: 'bpmn_pool',
+    label: 'Pool / Swimlane (BPMN)',
+    category: 'bpmn',
+    keywords: ['bpmn', 'pool', 'lane', 'swimlane', 'aktor', 'divisi'],
+    defaultWidth: 460,
+    defaultHeight: 170,
+    defaultText: 'Divisi Operasional',
+    defaultFill: 'transparent',
+    preview: [
+      { kind: 'rect', props: { x: 3, y: 5, width: 34, height: 22 } },
+      { kind: 'line', props: { x1: 11, y1: 5, x2: 11, y2: 27 } },
+    ],
   },
 
   // 3. DFD (Data Flow Diagram)
@@ -607,6 +901,100 @@ export const SHAPE_DEFINITIONS = [
       { kind: 'path', props: { d: 'M 4 11 H 15 L 18 8 V 4' } },
     ],
   },
+  {
+    type: 'uml_initial_node',
+    label: 'Initial Node (Activity)',
+    category: 'uml',
+    keywords: ['uml', 'activity', 'initial', 'start', 'mulai', 'state'],
+    defaultWidth: 40,
+    defaultHeight: 40,
+    defaultText: '',
+    defaultFill: '#0F172A',
+    preview: [{ kind: 'circle', props: { cx: 20, cy: 16, r: 8, fill: 'currentColor' } }],
+  },
+  {
+    type: 'uml_final_node',
+    label: 'Activity Final (Bullseye)',
+    category: 'uml',
+    keywords: ['uml', 'activity', 'final', 'end', 'selesai', 'bullseye', 'state'],
+    defaultWidth: 46,
+    defaultHeight: 46,
+    defaultText: '',
+    defaultFill: '#FFFFFF',
+    preview: [
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 10 } },
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 5.5, fill: 'currentColor' } },
+    ],
+  },
+  {
+    type: 'uml_flow_final',
+    label: 'Flow Final Node',
+    category: 'uml',
+    keywords: ['uml', 'activity', 'flow final', 'terminate', 'x'],
+    defaultWidth: 44,
+    defaultHeight: 44,
+    defaultText: '',
+    defaultFill: '#FFFFFF',
+    preview: [
+      { kind: 'circle', props: { cx: 20, cy: 16, r: 10 } },
+      { kind: 'line', props: { x1: 13, y1: 9, x2: 27, y2: 23 } },
+      { kind: 'line', props: { x1: 27, y1: 9, x2: 13, y2: 23 } },
+    ],
+  },
+  {
+    type: 'uml_fork_join',
+    label: 'Fork / Join Bar (Activity)',
+    category: 'uml',
+    keywords: ['uml', 'activity', 'fork', 'join', 'bar', 'sinkronisasi', 'paralel'],
+    defaultWidth: 160,
+    defaultHeight: 14,
+    defaultText: '',
+    defaultFill: '#0F172A',
+    preview: [{ kind: 'rect', props: { x: 4, y: 13, width: 32, height: 6, rx: 2, fill: 'currentColor' } }],
+  },
+  {
+    type: 'uml_action',
+    label: 'Action / State (Activity)',
+    category: 'uml',
+    keywords: ['uml', 'activity', 'action', 'state', 'aksi', 'status'],
+    defaultWidth: 160,
+    defaultHeight: 68,
+    defaultText: 'Validasi Data',
+    defaultFill: '#DBEAFE',
+    preview: [{ kind: 'rect', props: { x: 4, y: 7, width: 32, height: 18, rx: 9 } }],
+  },
+  {
+    type: 'uml_component',
+    label: 'Komponen UML',
+    category: 'uml',
+    keywords: ['uml', 'component', 'komponen', 'service', 'module'],
+    defaultWidth: 180,
+    defaultHeight: 96,
+    defaultText: 'AuthComponent',
+    defaultFill: '#FFFFFF',
+    defaultExtra: { stereotype: '«component»' },
+    preview: [
+      { kind: 'rect', props: { x: 7, y: 5, width: 28, height: 22 } },
+      { kind: 'rect', props: { x: 3, y: 9, width: 7, height: 4 } },
+      { kind: 'rect', props: { x: 3, y: 18, width: 7, height: 4 } },
+    ],
+  },
+  {
+    type: 'uml_node',
+    label: 'Node Deployment (Kubus 3D)',
+    category: 'uml',
+    keywords: ['uml', 'deployment', 'node', 'cube', 'kubus', 'server', 'device', 'vm'],
+    defaultWidth: 176,
+    defaultHeight: 120,
+    defaultText: 'App Server',
+    defaultFill: '#F1F5F9',
+    defaultExtra: { stereotype: '«device»' },
+    preview: [
+      { kind: 'rect', props: { x: 5, y: 10, width: 24, height: 18 } },
+      { kind: 'path', props: { d: 'M 5 10 L 12 4 H 35 L 29 10' } },
+      { kind: 'path', props: { d: 'M 35 4 V 22 L 29 28' } },
+    ],
+  },
 
   // 6. System Architecture
   {
@@ -711,6 +1099,64 @@ export const SHAPE_DEFINITIONS = [
       { kind: 'line', props: { x1: 17, y1: 25, x2: 23, y2: 25 } },
     ],
   },
+  {
+    type: 'arch_cache',
+    label: 'Cache / Redis',
+    category: 'arch',
+    keywords: ['arch', 'cache', 'redis', 'memcached', 'memory', 'cepat'],
+    defaultWidth: 148,
+    defaultHeight: 84,
+    defaultText: 'Redis Cache',
+    defaultFill: '#FEE2E2',
+    defaultStroke: '#B91C1C',
+    preview: [
+      { kind: 'rect', props: { x: 5, y: 6, width: 30, height: 20, rx: 4 } },
+      { kind: 'polygon', props: { points: '22,9 15,17 20,17 18,23 25,15 20,15' } },
+    ],
+  },
+  {
+    type: 'arch_firewall',
+    label: 'Firewall / WAF',
+    category: 'arch',
+    keywords: ['arch', 'firewall', 'waf', 'security', 'keamanan', 'shield'],
+    defaultWidth: 148,
+    defaultHeight: 96,
+    defaultText: 'WAF / Firewall',
+    defaultFill: '#FEF3C7',
+    defaultStroke: '#B45309',
+    preview: [
+      { kind: 'path', props: { d: 'M 20 4 L 32 9 V 17 C 32 23 26 27 20 29 C 14 27 8 23 8 17 V 9 Z' } },
+    ],
+  },
+  {
+    type: 'arch_storage',
+    label: 'Object Storage / S3',
+    category: 'arch',
+    keywords: ['arch', 'storage', 's3', 'bucket', 'blob', 'cdn', 'file'],
+    defaultWidth: 144,
+    defaultHeight: 92,
+    defaultText: 'Object Storage',
+    defaultFill: '#DCFCE7',
+    defaultStroke: '#15803D',
+    preview: [
+      { kind: 'path', props: { d: 'M 9 8 H 31 L 28 26 H 12 Z' } },
+      { kind: 'ellipse', props: { cx: 20, cy: 8, rx: 11, ry: 3 } },
+    ],
+  },
+  {
+    type: 'arch_external_api',
+    label: 'API Pihak Ketiga',
+    category: 'arch',
+    keywords: ['arch', 'external', 'api', 'third party', 'payment', 'webhook', 'integrasi'],
+    defaultWidth: 168,
+    defaultHeight: 86,
+    defaultText: 'Payment API',
+    defaultFill: '#F8FAFC',
+    defaultExtra: { stereotype: '«external»' },
+    preview: [
+      { kind: 'rect', props: { x: 4, y: 6, width: 32, height: 20, rx: 4, strokeDasharray: '3 2' } },
+    ],
+  },
 ];
 
 /** @type {Map<string, ShapeDefinition>} */
@@ -751,8 +1197,9 @@ export function createElementFromShape(type, cx, cy, options = {}) {
     height,
     strokeColor: def?.defaultStroke ?? options.strokeColor ?? '#0F172A',
     fillColor: def?.defaultFill ?? options.fillColor ?? '#FFFFFF',
-    strokeWidth: 2,
-    strokeStyle: type === 'erd_chen_derived_attr' ? 'dashed' : 'solid',
+    strokeWidth: type === 'bpmn_end' ? 4 : 2,
+    strokeStyle:
+      type === 'erd_chen_derived_attr' || type === 'arch_external_api' ? 'dashed' : 'solid',
     roughness,
     opacity: 1,
     seed,
@@ -1308,11 +1755,21 @@ function drawCylinder(ctx, el, r) {
   ctx.stroke();
 
   if (el.type === 'arch_database') {
+    const bandY = r.y + ry * 2.05;
+    const bandRy = ry * 0.65;
     ctx.beginPath();
-    ctx.ellipse(cx, r.y + r.height * 0.48, rx, ry * 0.7, 0, 0, Math.PI);
+    ctx.ellipse(cx, bandY, rx, bandRy, 0, 0, Math.PI);
     ctx.strokeStyle = el.strokeColor;
     ctx.lineWidth = Math.max(1, el.strokeWidth * 0.75);
     ctx.stroke();
+
+    const textTop = bandY + bandRy + 2;
+    const textBottom = r.y + r.height - ry * 0.35;
+    drawBoxText(ctx, el.text || '', r.x, textTop, r.width, Math.max(20, textBottom - textTop), {
+      fontSize: el.fontSize,
+      fontFamily: el.fontFamily,
+    });
+    return;
   }
 
   drawBoxText(ctx, el.text || '', r.x, r.y + ry * 1.5, r.width, r.height - ry * 2, {
@@ -2127,6 +2584,695 @@ export function drawShapeElement(ctx, rc, el) {
       drawBoxText(ctx, el.text || '', r.x + 6, r.y + 20, r.width - 12, r.height - 40, {
         fontSize: el.fontSize,
         fontFamily: el.fontFamily,
+      });
+      break;
+    }
+
+    // === Rich Picture (Soft Systems Methodology — Checkland) ===
+    case 'rp_stakeholder': {
+      const iconH = r.height * 0.72;
+      const headR = Math.min(r.width * 0.2, iconH * 0.24);
+      const headCy = r.y + headR + 6;
+      const bodyTop = headCy + headR + 4;
+      const bodyBot = r.y + iconH;
+      const bodyHalfW = Math.min(r.width * 0.36, headR * 2.1);
+
+      ctx.beginPath();
+      ctx.arc(cx, headCy, headR, 0, Math.PI * 2);
+      paintPath(ctx, el);
+
+      ctx.beginPath();
+      ctx.moveTo(cx - bodyHalfW, bodyBot);
+      ctx.quadraticCurveTo(cx - bodyHalfW, bodyTop, cx, bodyTop);
+      ctx.quadraticCurveTo(cx + bodyHalfW, bodyTop, cx + bodyHalfW, bodyBot);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      drawBoxText(ctx, el.text || '', r.x - 16, bodyBot + 2, r.width + 32, r.height - iconH, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'rp_group': {
+      const iconH = r.height * 0.7;
+      const drawPerson = (px, py, scale) => {
+        const hr = Math.min(r.width * 0.12, iconH * 0.2) * scale;
+        const bTop = py + hr + 3;
+        const bBot = r.y + iconH;
+        const bw = hr * 1.95;
+        ctx.beginPath();
+        ctx.arc(px, py, hr, 0, Math.PI * 2);
+        paintPath(ctx, el);
+        ctx.beginPath();
+        ctx.moveTo(px - bw, bBot);
+        ctx.quadraticCurveTo(px - bw, bTop, px, bTop);
+        ctx.quadraticCurveTo(px + bw, bTop, px + bw, bBot);
+        ctx.closePath();
+        paintPath(ctx, el);
+      };
+      const sideOffset = Math.min(34, r.width * 0.26);
+      drawPerson(cx - sideOffset, r.y + iconH * 0.34, 0.85);
+      drawPerson(cx + sideOffset, r.y + iconH * 0.34, 0.85);
+      drawPerson(cx, r.y + iconH * 0.26, 1.0);
+      drawBoxText(ctx, el.text || '', r.x - 12, r.y + iconH + 2, r.width + 24, r.height - iconH, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'rp_thought': {
+      const x = r.x;
+      const y = r.y;
+      const w = r.width;
+      const h = r.height * 0.78;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.22, y + h * 0.9);
+      ctx.bezierCurveTo(x, y + h * 0.9, x, y + h * 0.45, x + w * 0.16, y + h * 0.4);
+      ctx.bezierCurveTo(x + w * 0.16, y + h * 0.08, x + w * 0.48, y + h * 0.04, x + w * 0.56, y + h * 0.22);
+      ctx.bezierCurveTo(x + w * 0.76, y + h * 0.08, x + w * 0.96, y + h * 0.3, x + w * 0.88, y + h * 0.54);
+      ctx.bezierCurveTo(x + w, y + h * 0.78, x + w * 0.82, y + h * 0.94, x + w * 0.66, y + h * 0.9);
+      ctx.bezierCurveTo(x + w * 0.54, y + h * 0.98, x + w * 0.34, y + h * 0.98, x + w * 0.22, y + h * 0.9);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      // Trailing thought circles
+      ctx.beginPath();
+      ctx.arc(x + w * 0.22, r.y + h + (r.height - h) * 0.36, Math.min(7, (r.height - h) * 0.28), 0, Math.PI * 2);
+      paintPath(ctx, el);
+      ctx.beginPath();
+      ctx.arc(x + w * 0.12, r.y + h + (r.height - h) * 0.76, Math.min(4.2, (r.height - h) * 0.18), 0, Math.PI * 2);
+      paintPath(ctx, el);
+
+      drawBoxText(ctx, el.text || '', x + w * 0.12, y + h * 0.16, w * 0.76, h * 0.68, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+      });
+      break;
+    }
+
+    case 'rp_speech': {
+      const tailH = Math.min(18, r.height * 0.2);
+      const boxH = r.height - tailH;
+      const rad = 12;
+      ctx.beginPath();
+      ctx.moveTo(r.x + rad, r.y);
+      ctx.lineTo(r.x + r.width - rad, r.y);
+      ctx.quadraticCurveTo(r.x + r.width, r.y, r.x + r.width, r.y + rad);
+      ctx.lineTo(r.x + r.width, r.y + boxH - rad);
+      ctx.quadraticCurveTo(r.x + r.width, r.y + boxH, r.x + r.width - rad, r.y + boxH);
+      ctx.lineTo(r.x + Math.min(48, r.width * 0.36), r.y + boxH);
+      ctx.lineTo(r.x + Math.min(20, r.width * 0.16), r.y + r.height);
+      ctx.lineTo(r.x + Math.min(24, r.width * 0.2), r.y + boxH);
+      ctx.lineTo(r.x + rad, r.y + boxH);
+      ctx.quadraticCurveTo(r.x, r.y + boxH, r.x, r.y + boxH - rad);
+      ctx.lineTo(r.x, r.y + rad);
+      ctx.quadraticCurveTo(r.x, r.y, r.x + rad, r.y);
+      ctx.closePath();
+      paintPath(ctx, el);
+      drawBoxText(ctx, el.text || '', r.x + 6, r.y + 4, r.width - 12, boxH - 8, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+      });
+      break;
+    }
+
+    case 'rp_conflict': {
+      const iconH = r.height * 0.72;
+      const icx = cx;
+      const icy = r.y + iconH / 2 + 2;
+      const rad = Math.min(r.width, iconH) * 0.44;
+
+      // Soft circular emblem behind crossed swords
+      ctx.beginPath();
+      ctx.arc(icx, icy, rad, 0, Math.PI * 2);
+      paintPath(ctx, el);
+
+      // Classic SSM Crossed Swords
+      const s = rad * 0.66;
+      const g = rad * 0.22;
+      ctx.save();
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = Math.max(2.2, el.strokeWidth + 0.4);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      // Sword 1 (top-left to bottom-right)
+      ctx.moveTo(icx - s, icy - s);
+      ctx.lineTo(icx + s, icy + s);
+      // Guard 1 (near bottom-right hilt)
+      ctx.moveTo(icx + s * 0.35 - g, icy + s * 0.35 + g);
+      ctx.lineTo(icx + s * 0.35 + g, icy + s * 0.35 - g);
+      // Sword 2 (top-right to bottom-left)
+      ctx.moveTo(icx + s, icy - s);
+      ctx.lineTo(icx - s, icy + s);
+      // Guard 2 (near bottom-left hilt)
+      ctx.moveTo(icx - s * 0.35 - g, icy + s * 0.35 - g);
+      ctx.lineTo(icx - s * 0.35 + g, icy + s * 0.35 + g);
+      ctx.stroke();
+      ctx.restore();
+
+      drawBoxText(ctx, el.text || '', r.x - 12, r.y + iconH + 2, r.width + 24, r.height - iconH, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'rp_eye': {
+      const iconH = r.height * 0.68;
+      const ey = r.y + iconH / 2 + 2;
+      const ex1 = r.x + 8;
+      const ex2 = r.x + r.width - 8;
+      const arc = iconH * 0.56;
+
+      ctx.beginPath();
+      ctx.moveTo(ex1, ey);
+      ctx.quadraticCurveTo(cx, ey - arc, ex2, ey);
+      ctx.quadraticCurveTo(cx, ey + arc, ex1, ey);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      const irisR = Math.min(iconH * 0.27, (ex2 - ex1) * 0.18);
+      ctx.beginPath();
+      ctx.arc(cx, ey, irisR, 0, Math.PI * 2);
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.strokeWidth;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, ey, irisR * 0.45, 0, Math.PI * 2);
+      ctx.fillStyle = el.strokeColor;
+      ctx.fill();
+
+      drawBoxText(ctx, el.text || '', r.x - 10, r.y + iconH + 2, r.width + 20, r.height - iconH, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'rp_crisis': {
+      const iconH = r.height * 0.72;
+      const ix = r.x + r.width * 0.18;
+      const iw = r.width * 0.64;
+      const iy = r.y + 4;
+      const ih = iconH - 6;
+      ctx.beginPath();
+      ctx.moveTo(ix + iw * 0.58, iy);
+      ctx.lineTo(ix + iw * 0.14, iy + ih * 0.54);
+      ctx.lineTo(ix + iw * 0.48, iy + ih * 0.54);
+      ctx.lineTo(ix + iw * 0.34, iy + ih);
+      ctx.lineTo(ix + iw * 0.86, iy + ih * 0.42);
+      ctx.lineTo(ix + iw * 0.52, iy + ih * 0.42);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      drawBoxText(ctx, el.text || '', r.x - 14, r.y + iconH + 2, r.width + 28, r.height - iconH, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'rp_organization': {
+      const iconH = r.height * 0.72;
+      const bx = r.x + r.width * 0.16;
+      const bw = r.width * 0.68;
+      const by = r.y + 6;
+      const bh = iconH - 6;
+
+      ctx.beginPath();
+      ctx.rect(bx, by, bw, bh);
+      paintPath(ctx, el);
+
+      // Windows 2x2 + Door
+      const winW = bw * 0.18;
+      const winH = bh * 0.16;
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = Math.max(1.2, el.strokeWidth * 0.75);
+      for (const rxOff of [0.18, 0.64]) {
+        for (const ryOff of [0.16, 0.42]) {
+          ctx.strokeRect(bx + bw * rxOff, by + bh * ryOff, winW, winH);
+        }
+      }
+      ctx.strokeRect(bx + bw * 0.39, by + bh * 0.68, bw * 0.22, bh * 0.32);
+
+      drawBoxText(ctx, el.text || '', r.x - 10, r.y + iconH + 2, r.width + 20, r.height - iconH, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'rp_money': {
+      const iconH = r.height * 0.72;
+      const icy = r.y + iconH / 2 + 2;
+      const rad = Math.min(r.width, iconH) * 0.44;
+
+      ctx.beginPath();
+      ctx.arc(cx, icy, rad, 0, Math.PI * 2);
+      paintPath(ctx, el);
+
+      ctx.beginPath();
+      ctx.arc(cx, icy, Math.max(4, rad - 5), 0, Math.PI * 2);
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+
+      drawBoxText(ctx, 'Rp', cx - rad, icy - rad, rad * 2, rad * 2, {
+        fontSize: Math.max(12, Math.round(rad * 0.65)),
+        fontFamily: 'mono',
+        color: el.strokeColor,
+        bold: true,
+      });
+
+      drawBoxText(ctx, el.text || '', r.x - 12, r.y + iconH + 2, r.width + 24, r.height - iconH, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'rp_document_stack': {
+      const off = 8;
+      // Back sheet
+      ctx.beginPath();
+      ctx.rect(r.x + off, r.y, r.width - off, r.height - off);
+      paintPath(ctx, el);
+      // Front sheet
+      ctx.beginPath();
+      ctx.rect(r.x, r.y + off, r.width - off, r.height - off);
+      paintPath(ctx, el);
+
+      drawBoxText(ctx, el.text || '', r.x + 6, r.y + off + 4, r.width - off - 12, r.height - off - 8, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+      });
+      break;
+    }
+
+    // === BPMN 2.0 (OMG ISO/IEC 19510) ===
+    case 'bpmn_start':
+    case 'bpmn_intermediate':
+    case 'bpmn_end': {
+      const rad = Math.min(r.width, r.height) / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      if (el.fillColor && el.fillColor !== 'transparent') {
+        ctx.fillStyle = el.fillColor;
+        ctx.fill();
+      }
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.type === 'bpmn_end' ? Math.max(3.5, el.strokeWidth) : el.strokeWidth;
+      applyStrokeDash(ctx, el.strokeStyle);
+      ctx.stroke();
+
+      if (el.type === 'bpmn_intermediate') {
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(4, rad - 5), 0, Math.PI * 2);
+        ctx.lineWidth = Math.max(1.25, el.strokeWidth * 0.75);
+        ctx.stroke();
+      }
+
+      drawBoxText(ctx, el.text || '', r.x - 16, r.y + r.height + 2, r.width + 32, 24, {
+        fontSize: el.fontSize || 12,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'bpmn_task':
+    case 'bpmn_subprocess': {
+      if (useRough && rc) {
+        rc.path(roundedRectSvgPath(r.x, r.y, r.width, r.height, 10), roughOpts(el));
+      } else {
+        traceRoundedRect(ctx, r.x, r.y, r.width, r.height, 10);
+        paintPath(ctx, el);
+      }
+      if (el.type === 'bpmn_subprocess') {
+        const s = 14;
+        const sx = cx - s / 2;
+        const sy = r.y + r.height - s - 4;
+        ctx.strokeStyle = el.strokeColor;
+        ctx.lineWidth = 1.4;
+        ctx.strokeRect(sx, sy, s, s);
+        ctx.beginPath();
+        ctx.moveTo(cx, sy + 3);
+        ctx.lineTo(cx, sy + s - 3);
+        ctx.moveTo(sx + 3, sy + s / 2);
+        ctx.lineTo(sx + s - 3, sy + s / 2);
+        ctx.stroke();
+      }
+      drawBoxText(
+        ctx,
+        el.text || '',
+        r.x + 8,
+        r.y + 4,
+        r.width - 16,
+        el.type === 'bpmn_subprocess' ? r.height - 22 : r.height - 8,
+        { fontSize: el.fontSize, fontFamily: el.fontFamily },
+      );
+      break;
+    }
+
+    case 'bpmn_gateway_xor':
+    case 'bpmn_gateway_and': {
+      /** @type {[number, number][]} */
+      const pts = [
+        [cx, r.y],
+        [r.x + r.width, cy],
+        [cx, r.y + r.height],
+        [r.x, cy],
+      ];
+      if (useRough && rc) {
+        rc.polygon(pts, roughOpts(el));
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        pts.slice(1).forEach(([px, py]) => ctx.lineTo(px, py));
+        ctx.closePath();
+        paintPath(ctx, el);
+      }
+
+      const arm = Math.min(r.width, r.height) * 0.2;
+      ctx.save();
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = Math.max(2.5, el.strokeWidth + 0.8);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      if (el.type === 'bpmn_gateway_xor') {
+        ctx.moveTo(cx - arm, cy - arm);
+        ctx.lineTo(cx + arm, cy + arm);
+        ctx.moveTo(cx + arm, cy - arm);
+        ctx.lineTo(cx - arm, cy + arm);
+      } else {
+        ctx.moveTo(cx, cy - arm * 1.15);
+        ctx.lineTo(cx, cy + arm * 1.15);
+        ctx.moveTo(cx - arm * 1.15, cy);
+        ctx.lineTo(cx + arm * 1.15, cy);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      if (el.text) {
+        drawBoxText(ctx, el.text, r.x - 20, r.y + r.height + 2, r.width + 40, 24, {
+          fontSize: el.fontSize || 12,
+          fontFamily: el.fontFamily,
+        });
+      }
+      break;
+    }
+
+    case 'bpmn_data_object': {
+      const fold = Math.min(18, r.width * 0.26);
+      ctx.beginPath();
+      ctx.moveTo(r.x, r.y);
+      ctx.lineTo(r.x + r.width - fold, r.y);
+      ctx.lineTo(r.x + r.width, r.y + fold);
+      ctx.lineTo(r.x + r.width, r.y + r.height);
+      ctx.lineTo(r.x, r.y + r.height);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      ctx.beginPath();
+      ctx.moveTo(r.x + r.width - fold, r.y);
+      ctx.lineTo(r.x + r.width - fold, r.y + fold);
+      ctx.lineTo(r.x + r.width, r.y + fold);
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.strokeWidth;
+      ctx.stroke();
+
+      drawBoxText(ctx, el.text || '', r.x + 6, r.y + fold, r.width - 12, r.height - fold - 4, {
+        fontSize: el.fontSize || 12,
+        fontFamily: el.fontFamily,
+      });
+      break;
+    }
+
+    case 'bpmn_pool': {
+      const headerW = 34;
+      ctx.beginPath();
+      ctx.rect(r.x, r.y, r.width, r.height);
+      paintPath(ctx, el);
+
+      ctx.fillStyle = '#F1F5F9';
+      ctx.fillRect(r.x + 1, r.y + 1, headerW - 1, r.height - 2);
+      ctx.beginPath();
+      ctx.moveTo(r.x + headerW, r.y);
+      ctx.lineTo(r.x + headerW, r.y + r.height);
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.strokeWidth;
+      ctx.stroke();
+
+      ctx.save();
+      ctx.translate(r.x + headerW / 2, cy);
+      ctx.rotate(-Math.PI / 2);
+      drawBoxText(ctx, el.text || 'Swimlane', -r.height / 2, -headerW / 2, r.height, headerW, {
+        fontSize: el.fontSize || 13,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      ctx.restore();
+      break;
+    }
+
+    // === UML 2.5 Activity, Component & Deployment ===
+    case 'uml_initial_node': {
+      const rad = Math.min(r.width, r.height) / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.fillStyle = el.fillColor === 'transparent' ? el.strokeColor : el.fillColor;
+      ctx.fill();
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.strokeWidth;
+      ctx.stroke();
+      break;
+    }
+
+    case 'uml_final_node': {
+      const rad = Math.min(r.width, r.height) / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      paintPath(ctx, el);
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(4, rad * 0.58), 0, Math.PI * 2);
+      ctx.fillStyle = el.strokeColor;
+      ctx.fill();
+      break;
+    }
+
+    case 'uml_flow_final': {
+      const rad = Math.min(r.width, r.height) / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      paintPath(ctx, el);
+      const d = rad * 0.707;
+      ctx.beginPath();
+      ctx.moveTo(cx - d, cy - d);
+      ctx.lineTo(cx + d, cy + d);
+      ctx.moveTo(cx + d, cy - d);
+      ctx.lineTo(cx - d, cy + d);
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.strokeWidth;
+      ctx.stroke();
+      break;
+    }
+
+    case 'uml_fork_join': {
+      traceRoundedRect(ctx, r.x, r.y, r.width, r.height, 4);
+      ctx.fillStyle = el.fillColor === 'transparent' ? el.strokeColor : el.fillColor;
+      ctx.fill();
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.strokeWidth;
+      ctx.stroke();
+      break;
+    }
+
+    case 'uml_action': {
+      const rad = Math.min(20, r.height * 0.42);
+      if (useRough && rc) {
+        rc.path(roundedRectSvgPath(r.x, r.y, r.width, r.height, rad), roughOpts(el));
+      } else {
+        traceRoundedRect(ctx, r.x, r.y, r.width, r.height, rad);
+        paintPath(ctx, el);
+      }
+      drawBoxText(ctx, el.text || '', r.x + 8, r.y, r.width - 16, r.height, {
+        fontSize: el.fontSize,
+        fontFamily: el.fontFamily,
+      });
+      break;
+    }
+
+    case 'uml_component': {
+      const tabW = 14;
+      const tabH = 8;
+      const bodyX = r.x + tabW * 0.5;
+      const bodyW = r.width - tabW * 0.5;
+      ctx.beginPath();
+      ctx.rect(bodyX, r.y, bodyW, r.height);
+      paintPath(ctx, el);
+
+      // Official UML component 2-tab symbol on left side
+      const t1Y = r.y + Math.min(18, r.height * 0.22);
+      const t2Y = r.y + Math.min(36, r.height * 0.56);
+      ctx.beginPath();
+      ctx.rect(r.x, t1Y, tabW, tabH);
+      paintPath(ctx, el);
+      ctx.beginPath();
+      ctx.rect(r.x, t2Y, tabW, tabH);
+      paintPath(ctx, el);
+
+      const stereo = el.stereotype || '«component»';
+      drawBoxText(ctx, stereo, bodyX + 8, r.y + 8, bodyW - 12, 20, {
+        fontSize: 11,
+        fontFamily: 'mono',
+        color: '#475569',
+      });
+      drawBoxText(ctx, el.text || '', bodyX + 8, r.y + 24, bodyW - 12, r.height - 28, {
+        fontSize: el.fontSize,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'uml_node': {
+      // Official UML 2.5 Deployment Node (3D perspective cuboid/cube)
+      const depth = Math.min(16, r.width * 0.14, r.height * 0.2);
+      const fx = r.x;
+      const fy = r.y + depth;
+      const fw = r.width - depth;
+      const fh = r.height - depth;
+
+      // Top face
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(fx + depth, r.y);
+      ctx.lineTo(r.x + r.width, r.y);
+      ctx.lineTo(fx + fw, fy);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      // Right face
+      ctx.beginPath();
+      ctx.moveTo(fx + fw, fy);
+      ctx.lineTo(r.x + r.width, r.y);
+      ctx.lineTo(r.x + r.width, r.y + fh);
+      ctx.lineTo(fx + fw, r.y + r.height);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      // Front face
+      ctx.beginPath();
+      ctx.rect(fx, fy, fw, fh);
+      paintPath(ctx, el);
+
+      const stereo = el.stereotype || '«device»';
+      drawBoxText(ctx, stereo, fx + 6, fy + 6, fw - 12, 20, {
+        fontSize: 11,
+        fontFamily: 'mono',
+        color: '#475569',
+      });
+      drawBoxText(ctx, el.text || '', fx + 6, fy + 22, fw - 12, fh - 26, {
+        fontSize: el.fontSize,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    // === Expanded System Architecture ===
+    case 'arch_cache': {
+      traceRoundedRect(ctx, r.x, r.y, r.width, r.height, 8);
+      paintPath(ctx, el);
+      // Fast bolt accent on top-left
+      const bx = r.x + 12;
+      const by = r.y + 10;
+      ctx.beginPath();
+      ctx.moveTo(bx + 8, by);
+      ctx.lineTo(bx + 1, by + 10);
+      ctx.lineTo(bx + 6, by + 10);
+      ctx.lineTo(bx + 4, by + 18);
+      ctx.lineTo(bx + 12, by + 8);
+      ctx.lineTo(bx + 7, by + 8);
+      ctx.closePath();
+      ctx.fillStyle = el.strokeColor;
+      ctx.fill();
+
+      drawBoxText(ctx, el.text || '', r.x + 22, r.y, r.width - 28, r.height, {
+        fontSize: el.fontSize,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'arch_firewall': {
+      ctx.beginPath();
+      ctx.moveTo(cx, r.y);
+      ctx.lineTo(r.x + r.width, r.y + r.height * 0.2);
+      ctx.lineTo(r.x + r.width, r.y + r.height * 0.56);
+      ctx.quadraticCurveTo(r.x + r.width, r.y + r.height * 0.86, cx, r.y + r.height);
+      ctx.quadraticCurveTo(r.x, r.y + r.height * 0.86, r.x, r.y + r.height * 0.56);
+      ctx.lineTo(r.x, r.y + r.height * 0.2);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      drawBoxText(ctx, el.text || '', r.x + 10, r.y + r.height * 0.18, r.width - 20, r.height * 0.64, {
+        fontSize: el.fontSize,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'arch_storage': {
+      const ry = Math.min(12, r.height * 0.14);
+      const inset = Math.min(14, r.width * 0.12);
+      ctx.beginPath();
+      ctx.moveTo(r.x, r.y + ry);
+      ctx.lineTo(r.x + r.width, r.y + ry);
+      ctx.lineTo(r.x + r.width - inset, r.y + r.height - 4);
+      ctx.quadraticCurveTo(cx, r.y + r.height + 4, r.x + inset, r.y + r.height - 4);
+      ctx.closePath();
+      paintPath(ctx, el);
+
+      ctx.beginPath();
+      ctx.ellipse(cx, r.y + ry, r.width / 2, ry, 0, 0, Math.PI * 2);
+      paintPath(ctx, el);
+
+      drawBoxText(ctx, el.text || '', r.x + inset, r.y + ry * 2, r.width - inset * 2, r.height - ry * 2.4, {
+        fontSize: el.fontSize,
+        fontFamily: el.fontFamily,
+        bold: true,
+      });
+      break;
+    }
+
+    case 'arch_external_api': {
+      traceRoundedRect(ctx, r.x, r.y, r.width, r.height, 8);
+      paintPath(ctx, el);
+      const stereo = el.stereotype || '«external»';
+      drawBoxText(ctx, stereo, r.x + 6, r.y + 6, r.width - 12, 20, {
+        fontSize: 11,
+        fontFamily: 'mono',
+        color: '#475569',
+      });
+      drawBoxText(ctx, el.text || '', r.x + 6, r.y + 22, r.width - 12, r.height - 26, {
+        fontSize: el.fontSize,
+        fontFamily: el.fontFamily,
+        bold: true,
       });
       break;
     }

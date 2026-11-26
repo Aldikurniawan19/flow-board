@@ -6,7 +6,7 @@ import {
   resolveBindingPoint,
 } from './ports.js';
 
-const CONTAINER_TYPES = new Set(['frame', 'uml_boundary', 'uml_fragment']);
+const CONTAINER_TYPES = new Set(['frame', 'uml_boundary', 'uml_fragment', 'bpmn_pool']);
 
 /**
  * @typedef {{ x: number, y: number }} Pt

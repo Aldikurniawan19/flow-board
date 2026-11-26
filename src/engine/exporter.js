@@ -191,20 +191,86 @@ export function exportToSvgString(elements, options = {}) {
       el.type === 'ellipse' ||
       el.type === 'uml_usecase' ||
       el.type === 'dfd_yd_process' ||
+      el.type === 'bpmn_start' ||
+      el.type === 'bpmn_intermediate' ||
+      el.type === 'bpmn_end' ||
+      el.type === 'uml_initial_node' ||
+      el.type === 'uml_final_node' ||
+      el.type === 'uml_flow_final' ||
       (el.type.startsWith('erd_chen_') && el.type.includes('attr'))
     ) {
+      const sw = el.type === 'bpmn_end' ? Math.max(3.5, el.strokeWidth) : el.strokeWidth;
+      const svgFill = el.type === 'uml_initial_node' ? stroke : fill;
       parts.push(
-        `<ellipse cx="${cx}" cy="${cy}" rx="${r.width / 2}" ry="${r.height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}"${dash} />`,
+        `<ellipse cx="${cx}" cy="${cy}" rx="${r.width / 2}" ry="${r.height / 2}" fill="${svgFill}" stroke="${stroke}" stroke-width="${sw}"${dash} />`,
       );
+      if (el.type === 'bpmn_intermediate') {
+        parts.push(
+          `<ellipse cx="${cx}" cy="${cy}" rx="${Math.max(4, r.width / 2 - 5)}" ry="${Math.max(4, r.height / 2 - 5)}" fill="none" stroke="${stroke}" stroke-width="1.25" />`,
+        );
+      } else if (el.type === 'uml_final_node') {
+        parts.push(
+          `<ellipse cx="${cx}" cy="${cy}" rx="${Math.max(3, r.width * 0.29)}" ry="${Math.max(3, r.height * 0.29)}" fill="${stroke}" />`,
+        );
+      } else if (el.type === 'uml_flow_final') {
+        const d = (Math.min(r.width, r.height) / 2) * 0.707;
+        parts.push(
+          `<line x1="${cx - d}" y1="${cy - d}" x2="${cx + d}" y2="${cy + d}" stroke="${stroke}" stroke-width="${sw}" />`,
+          `<line x1="${cx + d}" y1="${cy - d}" x2="${cx - d}" y2="${cy + d}" stroke="${stroke}" stroke-width="${sw}" />`,
+        );
+      }
     } else if (
       el.type === 'diamond' ||
       el.type === 'fc_decision' ||
+      el.type === 'bpmn_gateway_xor' ||
+      el.type === 'bpmn_gateway_and' ||
       el.type === 'erd_chen_relation' ||
       el.type === 'erd_chen_id_relation'
     ) {
       const pts = `${cx},${r.y} ${r.x + r.width},${cy} ${cx},${r.y + r.height} ${r.x},${cy}`;
       parts.push(
         `<polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}"${dash} />`,
+      );
+      const arm = Math.min(r.width, r.height) * 0.2;
+      if (el.type === 'bpmn_gateway_xor') {
+        parts.push(
+          `<line x1="${cx - arm}" y1="${cy - arm}" x2="${cx + arm}" y2="${cy + arm}" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" />`,
+          `<line x1="${cx + arm}" y1="${cy - arm}" x2="${cx - arm}" y2="${cy + arm}" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" />`,
+        );
+      } else if (el.type === 'bpmn_gateway_and') {
+        parts.push(
+          `<line x1="${cx}" y1="${cy - arm * 1.15}" x2="${cx}" y2="${cy + arm * 1.15}" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" />`,
+          `<line x1="${cx - arm * 1.15}" y1="${cy}" x2="${cx + arm * 1.15}" y2="${cy}" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" />`,
+        );
+      }
+    } else if (el.type === 'uml_node') {
+      const depth = Math.min(16, r.width * 0.14, r.height * 0.2);
+      const fw = r.width - depth;
+      const fh = r.height - depth;
+      parts.push(
+        `<polygon points="${r.x},${r.y + depth} ${r.x + depth},${r.y} ${r.x + r.width},${r.y} ${r.x + fw},${r.y + depth}" fill="${fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}" />`,
+        `<polygon points="${r.x + fw},${r.y + depth} ${r.x + r.width},${r.y} ${r.x + r.width},${r.y + fh} ${r.x + fw},${r.y + r.height}" fill="${fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}" />`,
+        `<rect x="${r.x}" y="${r.y + depth}" width="${fw}" height="${fh}" fill="${fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}" />`,
+      );
+    } else if (el.type === 'rp_conflict') {
+      const iconH = r.height * 0.72;
+      const icy = r.y + iconH / 2 + 2;
+      const rad = Math.min(r.width, iconH) * 0.44;
+      const s = rad * 0.66;
+      parts.push(
+        `<circle cx="${cx}" cy="${icy}" r="${rad}" fill="${fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}" />`,
+        `<line x1="${cx - s}" y1="${icy - s}" x2="${cx + s}" y2="${icy + s}" stroke="${stroke}" stroke-width="2.4" stroke-linecap="round" />`,
+        `<line x1="${cx + s}" y1="${icy - s}" x2="${cx - s}" y2="${icy + s}" stroke="${stroke}" stroke-width="2.4" stroke-linecap="round" />`,
+      );
+    } else if (el.type === 'rp_eye') {
+      const iconH = r.height * 0.68;
+      const ey = r.y + iconH / 2 + 2;
+      const arc = iconH * 0.56;
+      const irisR = Math.min(iconH * 0.27, (r.width - 16) * 0.18);
+      parts.push(
+        `<path d="M ${r.x + 8} ${ey} Q ${cx} ${ey - arc} ${r.x + r.width - 8} ${ey} Q ${cx} ${ey + arc} ${r.x + 8} ${ey} Z" fill="${fill}" stroke="${stroke}" stroke-width="${el.strokeWidth}" />`,
+        `<circle cx="${cx}" cy="${ey}" r="${irisR}" fill="none" stroke="${stroke}" stroke-width="${el.strokeWidth}" />`,
+        `<circle cx="${cx}" cy="${ey}" r="${irisR * 0.45}" fill="${stroke}" />`,
       );
     } else if (el.type === 'erd_table' || el.type === 'erd_weak_table') {
       const headerH = 34;

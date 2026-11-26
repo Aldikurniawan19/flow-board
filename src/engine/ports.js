@@ -1,8 +1,14 @@
-const CONTAINER_TYPES = new Set(['frame', 'uml_boundary', 'uml_fragment']);
+const CONTAINER_TYPES = new Set(['frame', 'uml_boundary', 'uml_fragment', 'bpmn_pool']);
 
 const ELLIPSE_TYPES = new Set([
   'ellipse',
   'uml_usecase',
+  'uml_initial_node',
+  'uml_final_node',
+  'uml_flow_final',
+  'bpmn_start',
+  'bpmn_intermediate',
+  'bpmn_end',
   'dfd_yd_process',
   'erd_chen_attribute',
   'erd_chen_key_attr',
@@ -13,6 +19,8 @@ const ELLIPSE_TYPES = new Set([
 const DIAMOND_TYPES = new Set([
   'diamond',
   'fc_decision',
+  'bpmn_gateway_xor',
+  'bpmn_gateway_and',
   'erd_chen_relation',
   'erd_chen_id_relation',
 ]);

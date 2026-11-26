@@ -23,7 +23,12 @@ import {
   parseAndValidateBoardJson,
   serializeBoardToJson,
 } from '../engine/exporter.js';
-import { createElementFromShape, morphElementShape } from '../engine/shapeRegistry.js';
+import {
+  SHAPE_CATEGORIES,
+  SHAPE_DEFINITIONS,
+  createElementFromShape,
+  morphElementShape,
+} from '../engine/shapeRegistry.js';
 import { recognizeFreehandShape } from '../engine/shapeRecognizer.js';
 import { buildErdTemplate } from '../constants/templates.js';
 
@@ -494,5 +499,54 @@ describe('360-degree symbol rotation', () => {
     const svg = exportToSvgString([vert, horiz]);
     expect(svg).toContain('stroke-linejoin="miter"');
     expect(svg).toContain('200.0,192.5');
+  });
+
+  it('registers schema-valid Rich Picture, BPMN 2.0, UML 2.5, and Architecture symbols with SVG export', () => {
+    const categoryIds = SHAPE_CATEGORIES.map((c) => c.id);
+    expect(categoryIds).toContain('rich_picture');
+    expect(categoryIds).toContain('bpmn');
+
+    const richPictureTypes = SHAPE_DEFINITIONS.filter((d) => d.category === 'rich_picture').map(
+      (d) => d.type,
+    );
+    expect(richPictureTypes).toEqual(
+      expect.arrayContaining([
+        'rp_stakeholder',
+        'rp_thought',
+        'rp_speech',
+        'rp_conflict',
+        'rp_eye',
+        'rp_crisis',
+      ]),
+    );
+
+    const bpmnTypes = SHAPE_DEFINITIONS.filter((d) => d.category === 'bpmn').map((d) => d.type);
+    expect(bpmnTypes).toEqual(
+      expect.arrayContaining([
+        'bpmn_start',
+        'bpmn_intermediate',
+        'bpmn_end',
+        'bpmn_task',
+        'bpmn_gateway_xor',
+        'bpmn_gateway_and',
+        'bpmn_data_object',
+        'bpmn_pool',
+      ]),
+    );
+
+    // Every registered shape produces a schema-valid element, has a preview icon, and exports cleanly to SVG
+    const created = SHAPE_DEFINITIONS.map((def, idx) => {
+      expect(def.preview.length, `${def.type} must have preview primitives`).toBeGreaterThan(0);
+      const el = createElementFromShape(def.type, 100 + idx * 40, 100);
+      const parsed = ElementSchema.safeParse(el);
+      expect(parsed.success, `${def.type} must satisfy ElementSchema`).toBe(true);
+      return el;
+    });
+
+    const svg = exportToSvgString(created);
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('</svg>');
+    expect(svg).toContain('Konflik');
+    expect(svg).toContain('App Server');
   });
 });

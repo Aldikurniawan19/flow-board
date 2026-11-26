@@ -47,7 +47,9 @@ export function ShapeLibrarySidebar({ open, onToggle }) {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(() => ({
     basic: true,
-    flowchart: true,
+    rich_picture: true,
+    flowchart: false,
+    bpmn: false,
     dfd: true,
     erd: true,
     uml: false,
@@ -145,7 +147,7 @@ export function ShapeLibrarySidebar({ open, onToggle }) {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cari DFD, ERD, UML, proses..."
+            placeholder="Cari Rich Picture, BPMN, DFD, ERD, UML..."
             className="w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] pl-8 pr-3 py-1.5 text-xs text-[#0F172A] placeholder:text-[#94A3B8] focus:bg-[#FFFFFF] focus:border-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/20"
           />
         </div>

@@ -87,6 +87,17 @@ export const ELEMENT_TYPES = [
   'frame',
   'freehand',
   'connector',
+  // Rich Picture (SSM / Checkland)
+  'rp_stakeholder',
+  'rp_group',
+  'rp_thought',
+  'rp_speech',
+  'rp_conflict',
+  'rp_eye',
+  'rp_crisis',
+  'rp_organization',
+  'rp_money',
+  'rp_document_stack',
   // Flowchart
   'fc_terminator',
   'fc_process',
@@ -98,6 +109,16 @@ export const ELEMENT_TYPES = [
   'fc_manual_op',
   'fc_delay',
   'fc_offpage',
+  // BPMN 2.0 (ISO/IEC 19510)
+  'bpmn_start',
+  'bpmn_intermediate',
+  'bpmn_end',
+  'bpmn_task',
+  'bpmn_subprocess',
+  'bpmn_gateway_xor',
+  'bpmn_gateway_and',
+  'bpmn_data_object',
+  'bpmn_pool',
   // DFD (Gane & Sarson + Yourdon & DeMarco)
   'dfd_gs_process',
   'dfd_gs_datastore',
@@ -116,7 +137,7 @@ export const ELEMENT_TYPES = [
   'erd_chen_key_attr',
   'erd_chen_multi_attr',
   'erd_chen_derived_attr',
-  // UML (Class, Use Case, Sequence)
+  // UML 2.5 (Class, Use Case, Sequence, Activity, Component, Deployment)
   'uml_class',
   'uml_interface',
   'uml_package',
@@ -127,6 +148,13 @@ export const ELEMENT_TYPES = [
   'uml_lifeline',
   'uml_activation',
   'uml_fragment',
+  'uml_initial_node',
+  'uml_final_node',
+  'uml_flow_final',
+  'uml_fork_join',
+  'uml_action',
+  'uml_component',
+  'uml_node',
   // System Architecture
   'arch_server',
   'arch_cloud',
@@ -135,6 +163,10 @@ export const ELEMENT_TYPES = [
   'arch_gateway',
   'arch_browser',
   'arch_mobile',
+  'arch_cache',
+  'arch_firewall',
+  'arch_storage',
+  'arch_external_api',
 ];
 
 export const MARKER_TYPES = [

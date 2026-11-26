@@ -5,7 +5,9 @@ import { ShapePreviewIcon } from './ShapeLibrarySidebar.jsx';
 
 const CATEGORY_SHORT_LABELS = {
   basic: 'Dasar',
+  rich_picture: 'Rich Picture',
   flowchart: 'Flowchart',
+  bpmn: 'BPMN',
   dfd: 'DFD',
   erd: 'ERD',
   uml: 'UML',
