@@ -11,12 +11,22 @@ declare module 'node:fs' {
   export function existsSync(p: string): boolean;
   export function mkdirSync(p: string, options?: { recursive?: boolean }): void;
   export function readFileSync(p: string, encoding: string): string;
+  export function unlinkSync(p: string): void;
   const fsDefault: {
     existsSync: typeof existsSync;
     mkdirSync: typeof mkdirSync;
     readFileSync: typeof readFileSync;
+    unlinkSync: typeof unlinkSync;
   };
   export default fsDefault;
+}
+
+declare module 'node:os' {
+  export function tmpdir(): string;
+  const osDefault: {
+    tmpdir: typeof tmpdir;
+  };
+  export default osDefault;
 }
 
 declare module 'node:path' {

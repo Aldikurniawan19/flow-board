@@ -919,4 +919,52 @@ P1 --> D1 : Simpan Resi
       else process.env.GOOGLE_CLIENT_SECRET = prevSecret;
     }
   });
+
+  it('migrates legacy users table lacking google_sub and plan columns without failing on index creation', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { DatabaseSync } = await import('node:sqlite');
+    const { createSqliteDatabase } = await import('../../server/db.js');
+
+    const tmpFile = path.join(os.tmpdir(), `flowboard-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    try {
+      // Seed an older database schema that predates `plan`, `plan_expires_at`, and `google_sub`
+      const legacy = new DatabaseSync(tmpFile);
+      legacy.exec(`
+        CREATE TABLE users (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        INSERT INTO users (id, name, email, password_hash, created_at)
+        VALUES ('legacy-u1', 'Legacy User', 'legacy@example.com', 'hash', '2026-01-01T00:00:00.000Z');
+      `);
+      legacy.close();
+
+      // Re-opening with createSqliteDatabase must cleanly add columns before creating idx_users_google_sub
+      const migrated = await createSqliteDatabase(tmpFile);
+      try {
+        await migrated.run('UPDATE users SET google_sub = ? WHERE id = ?', ['sub-legacy-1', 'legacy-u1']);
+        const row = await migrated.get('SELECT id, plan, google_sub FROM users WHERE google_sub = ?', [
+          'sub-legacy-1',
+        ]);
+        expect(row?.id).toBe('legacy-u1');
+        expect(row?.plan).toBe('free');
+        expect(row?.google_sub).toBe('sub-legacy-1');
+      } finally {
+        await migrated.close();
+      }
+    } finally {
+      for (const suffix of ['', '-wal', '-shm']) {
+        try {
+          fs.unlinkSync(`${tmpFile}${suffix}`);
+        } catch {
+          // ignore cleanup
+        }
+      }
+    }
+  });
 });

@@ -13,7 +13,6 @@ const SCHEMA_STATEMENTS = [
     plan_expires_at TEXT,
     created_at TEXT NOT NULL
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)`,
   `CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -226,8 +225,8 @@ export async function createSqliteDatabase(dbPath = './data/flowboard.sqlite') {
   }
   if (!colNames.has('google_sub')) {
     raw.exec(`ALTER TABLE users ADD COLUMN google_sub TEXT;`);
-    raw.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub);`);
   }
+  raw.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub);`);
 
   return {
     dialect: 'sqlite',
