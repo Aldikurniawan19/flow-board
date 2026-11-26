@@ -512,15 +512,17 @@ P1 --> D1 : Simpan Resi
       expect(freeDeny.body.redirectTo).toContain('error=access_denied');
       expect(freeDeny.body.redirectTo).toContain('state=deny-state');
 
-      // 4. Owner inspects consent info & approves -> receives authorization code
+      // 4. Owner inspects consent info & approves (including long encrypted JWT-like state > 512 chars) -> receives authorization code
+      const longState = `eyJ.${'a'.repeat(1200)}.sig`;
       const infoRes = await ownerAgent
         .get(
-          `/api/oauth/authorize/info?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&code_challenge=${pkce1.challenge}&code_challenge_method=S256&state=state-xyz&resource=${encodeURIComponent('https://flowboard.example.test/api/mcp')}`,
+          `/api/oauth/authorize/info?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&code_challenge=${pkce1.challenge}&code_challenge_method=S256&state=${encodeURIComponent(longState)}&resource=${encodeURIComponent('https://flowboard.example.test/api/mcp')}`,
         )
         .set(HOST);
       expect(infoRes.status).toBe(200);
       expect(infoRes.body.client.clientName).toBe('Claude.ai Web');
       expect(infoRes.body.client.redirectHost).toBe('claude.ai');
+      expect(infoRes.body.state).toBe(longState);
 
       // Foreign RFC 8707 resource indicator must be rejected
       const foreignResource = await ownerAgent
@@ -541,12 +543,12 @@ P1 --> D1 : Simpan Resi
           response_type: 'code',
           code_challenge: pkce1.challenge,
           code_challenge_method: 'S256',
-          state: 'state-xyz',
+          state: longState,
           resource: 'https://flowboard.example.test/api/mcp',
         });
       expect(approve1.status).toBe(200);
       const callbackUrl1 = new URL(approve1.body.redirectTo);
-      expect(callbackUrl1.searchParams.get('state')).toBe('state-xyz');
+      expect(callbackUrl1.searchParams.get('state')).toBe(longState);
       const authCode1 = callbackUrl1.searchParams.get('code') || '';
       expect(authCode1).toMatch(/^fbc_/);
 

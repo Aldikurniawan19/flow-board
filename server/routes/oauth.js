@@ -183,22 +183,25 @@ function buildRedirectWithParams(redirectUri, params) {
 }
 
 const RegisterClientSchema = z.object({
-  client_name: z.string().trim().min(1).max(120).optional().default('MCP Client'),
+  client_name: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() ? v.trim() : 'MCP Client'),
+    z.string().min(1).max(256),
+  ),
   redirect_uris: z
     .array(z.string().trim())
     .min(1, 'redirect_uris wajib berisi minimal 1 URI.')
-    .max(10, 'Maksimal 10 redirect_uris per klien.'),
-  grant_types: z.array(z.string().trim()).max(5).optional(),
-  response_types: z.array(z.string().trim()).max(5).optional(),
+    .max(20, 'Maksimal 20 redirect_uris per klien.'),
+  grant_types: z.array(z.string().trim()).max(10).optional(),
+  response_types: z.array(z.string().trim()).max(10).optional(),
   token_endpoint_auth_method: z
     .enum(['none', 'client_secret_post', 'client_secret_basic'])
     .optional()
     .default('none'),
-  scope: z.string().trim().max(200).optional(),
+  scope: z.string().trim().max(1024).optional(),
 });
 
 const AuthorizeParamsSchema = z.object({
-  client_id: z.string().trim().min(1, 'client_id wajib diisi.').max(128),
+  client_id: z.string().trim().min(1, 'client_id wajib diisi.').max(512),
   redirect_uri: z.string().trim().min(1, 'redirect_uri wajib diisi.').max(2048),
   response_type: z.literal('code'),
   code_challenge: z
@@ -206,9 +209,10 @@ const AuthorizeParamsSchema = z.object({
     .trim()
     .regex(PKCE_PATTERN, 'code_challenge PKCE tidak valid (harus 43-128 karakter base64url).'),
   code_challenge_method: z.literal('S256'),
-  state: z.string().max(512).optional().default(''),
-  scope: z.string().max(256).optional().default(DEFAULT_SCOPE),
-  resource: z.string().max(512).optional(),
+  // Real-world AI connectors (Claude.ai, ChatGPT, Gemini) often pass encrypted JWT/JWE `state` > 512 chars
+  state: z.string().max(4096).optional().default(''),
+  scope: z.string().max(1024).optional().default(DEFAULT_SCOPE),
+  resource: z.string().max(2048).optional(),
 });
 
 const AuthorizeDecisionSchema = AuthorizeParamsSchema.extend({
@@ -780,9 +784,9 @@ export function createOAuthRouter(db, options = {}) {
         return res.status(401).json({ error: 'Autentikasi diperlukan.' });
       }
       const nowIso = new Date().toISOString();
-      const rows = /** @type {Array<{ id: string, client_id: string, client_name: string, scope: string, created_at: string, last_used_at: string | null, expires_at: string, refresh_expires_at: string | null }>} */ (
+      const rows = /** @type {Array<{ id: string, client_id: string, client_name: string, redirect_uris_json: string, scope: string, created_at: string, last_used_at: string | null, expires_at: string, refresh_expires_at: string | null }>} */ (
         await db.all(
-          `SELECT t.id, t.client_id, c.client_name, t.scope, t.created_at, t.last_used_at, t.expires_at, t.refresh_expires_at
+          `SELECT t.id, t.client_id, c.client_name, c.redirect_uris_json, t.scope, t.created_at, t.last_used_at, t.expires_at, t.refresh_expires_at
            FROM oauth_tokens t
            JOIN oauth_clients c ON c.client_id = t.client_id
            WHERE t.user_id = ?
@@ -795,15 +799,27 @@ export function createOAuthRouter(db, options = {}) {
       );
 
       return res.status(200).json({
-        connections: rows.map((row) => ({
-          id: row.id,
-          clientId: row.client_id,
-          clientName: row.client_name,
-          scope: row.scope,
-          createdAt: row.created_at,
-          lastUsedAt: row.last_used_at,
-          expiresAt: row.expires_at,
-        })),
+        connections: rows.map((row) => {
+          let firstRedirect = '';
+          try {
+            const parsed = JSON.parse(row.redirect_uris_json);
+            if (Array.isArray(parsed) && typeof parsed[0] === 'string') {
+              firstRedirect = parsed[0];
+            }
+          } catch {
+            firstRedirect = '';
+          }
+          return {
+            id: row.id,
+            clientId: row.client_id,
+            clientName: row.client_name,
+            redirectHost: firstRedirect ? describeRedirectTarget(firstRedirect) : '',
+            scope: row.scope,
+            createdAt: row.created_at,
+            lastUsedAt: row.last_used_at,
+            expiresAt: row.expires_at,
+          };
+        }),
       });
     } catch (err) {
       return next(err);

@@ -820,6 +820,7 @@ p "1" -- "N" t : "MELAKUKAN"
     expect(
       await screen.findByRole('heading', { name: 'Hubungkan Claude.ai Web ke FlowBoard' }),
     ).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Claude (Anthropic)' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Izinkan & Hubungkan' }));
     await waitFor(() => {
       expect(decisionSpy).toHaveBeenCalledWith(
@@ -831,5 +832,60 @@ p "1" -- "N" t : "MELAKUKAN"
         }),
       );
     });
+  });
+
+  it('detects official Gemini, ChatGPT, and Claude brand icons from OAuth client metadata', async () => {
+    const cases = [
+      {
+        clientName: 'Gemini Enterprise',
+        redirectUri: 'https://gemini.google.com/oauth/callback',
+        redirectHost: 'gemini.google.com',
+        expectedLabel: 'Google Gemini',
+      },
+      {
+        clientName: 'ChatGPT Connector',
+        redirectUri: 'https://chatgpt.com/connector_platform_oauth_redirect',
+        redirectHost: 'chatgpt.com',
+        expectedLabel: 'ChatGPT (OpenAI)',
+      },
+    ];
+
+    for (const item of cases) {
+      const qs = new URLSearchParams({
+        client_id: 'fb_cli_brand',
+        redirect_uri: item.redirectUri,
+        response_type: 'code',
+        code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+        code_challenge_method: 'S256',
+        state: 'brand-test',
+      });
+      window.history.replaceState({}, '', `/oauth/authorize?${qs.toString()}`);
+
+      vi.spyOn(apiClient, 'getMe').mockResolvedValueOnce({
+        user: {
+          id: 'u-own',
+          name: 'Aldi Owner',
+          email: 'owner@example.com',
+          plan: 'pro',
+          isOwner: true,
+          hasAiAccess: true,
+        },
+      });
+      vi.spyOn(apiClient, 'getOAuthAuthorizeInfo').mockResolvedValueOnce({
+        client: {
+          clientId: 'fb_cli_brand',
+          clientName: item.clientName,
+          redirectUri: item.redirectUri,
+          redirectHost: item.redirectHost,
+        },
+        scope: 'mcp:tools',
+        resource: 'https://flow-board-dun.vercel.app/api/mcp',
+        state: 'brand-test',
+      });
+
+      const view = render(<App />);
+      expect(await screen.findByRole('img', { name: item.expectedLabel })).toBeInTheDocument();
+      view.unmount();
+    }
   });
 });

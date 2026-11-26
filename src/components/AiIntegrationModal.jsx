@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../store/apiClient.js';
 import { useBoardStore } from '../store/useBoardStore.js';
+import { AiBrandIcon } from './AiBrandIcon.jsx';
 import { AiMotionShowcase } from './AiMotionShowcase.jsx';
 
 const PRO_PLANS = [
@@ -144,7 +145,7 @@ export function AiIntegrationModal({ open, onClose }) {
   );
   const [loadingKeys, setLoadingKeys] = useState(false);
   const [oauthConnections, setOauthConnections] = useState(
-    /** @type {Array<{ id: string, clientId: string, clientName: string, scope: string, createdAt: string, lastUsedAt: string | null }>} */ ([]),
+    /** @type {Array<{ id: string, clientId: string, clientName: string, redirectHost?: string, scope: string, createdAt: string, lastUsedAt: string | null }>} */ ([]),
   );
   const [revokingConnId, setRevokingConnId] = useState(/** @type {string | null} */ (null));
   const [keyName, setKeyName] = useState('');
@@ -815,12 +816,19 @@ export function AiIntegrationModal({ open, onClose }) {
                     {oauthConnections.map((conn) => (
                       <li
                         key={conn.id}
-                        className="flex items-center justify-between gap-2 px-3 py-2 bg-[#FFFFFF]"
+                        className="flex items-center justify-between gap-2.5 px-3 py-2 bg-[#FFFFFF]"
                       >
-                        <div className="min-w-0">
-                          <div className="font-medium text-[#0F172A] truncate">{conn.clientName}</div>
-                          <div className="text-[11px] text-[#475569] font-mono-tabular">
-                            Scope: {conn.scope} &bull; Dipakai: {formatDate(conn.lastUsedAt)}
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <AiBrandIcon
+                            clientName={conn.clientName}
+                            redirectUri={conn.redirectHost}
+                            size="sm"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-medium text-[#0F172A] truncate">{conn.clientName}</div>
+                            <div className="text-[11px] text-[#475569] font-mono-tabular">
+                              Scope: {conn.scope} &bull; Dipakai: {formatDate(conn.lastUsedAt)}
+                            </div>
                           </div>
                         </div>
                         <button

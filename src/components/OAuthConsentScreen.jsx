@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   AlertCircle,
-  Bot,
   CheckCircle2,
   Crown,
   Layers,
@@ -12,6 +11,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../store/apiClient.js';
 import { useBoardStore } from '../store/useBoardStore.js';
+import { AiBrandIcon } from './AiBrandIcon.jsx';
 
 const OAUTH_PERMISSIONS = [
   'Membuat dan menyimpan diagram DFD, ERD, UML, serta Flowchart baru ke papan kerja Anda',
@@ -38,6 +38,7 @@ export function OAuthConsentScreen({ onOpenUpgrade, onRedirect }) {
   );
 
   const search = typeof window !== 'undefined' ? window.location.search : '';
+  const hintRedirectUri = new URLSearchParams(search).get('redirect_uri') || '';
 
   useEffect(() => {
     let cancelled = false;
@@ -113,9 +114,11 @@ export function OAuthConsentScreen({ onOpenUpgrade, onRedirect }) {
             <Layers className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
           </div>
           <Link2 className="h-4 w-4 text-[#64748B]" strokeWidth={1.75} aria-hidden="true" />
-          <div className="h-10 w-10 rounded-lg bg-[#DBEAFE] text-[#1D4ED8] flex items-center justify-center shrink-0">
-            <Bot className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
-          </div>
+          <AiBrandIcon
+            clientName={info?.client.clientName}
+            redirectUri={info?.client.redirectUri || hintRedirectUri}
+            size="md"
+          />
         </div>
 
         <div className="p-6 space-y-5">
