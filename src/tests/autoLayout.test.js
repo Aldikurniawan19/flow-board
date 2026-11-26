@@ -6,6 +6,7 @@ import {
   orthoSegmentHitsRect,
   rectsOverlap,
   rerouteAffectedConnectors,
+  rerouteSingleConnector,
   tidyDiagramElements,
 } from '../engine/autoLayout.js';
 import { getNormalizedRect, isConnectableElement } from '../engine/ports.js';
@@ -501,5 +502,169 @@ P6 --> Pimp : Laporan statistik akademik
       fullTidied.metrics.before.edgeCrossings,
     );
     expect(fullTidied.metrics.after.score).toBeLessThan(fullTidied.metrics.before.score);
+  });
+
+  it('auto-reroutes cleanly without overlapping any component when dragging a connector endpoint to the extreme opposite side', () => {
+    const valid = createElementFromShape('fc_decision', 0, 0);
+    valid.id = 'valid';
+    valid.x = 240;
+    valid.y = 40;
+    valid.width = 140;
+    valid.height = 90;
+    valid.text = 'Valid?';
+
+    const session = createElementFromShape('fc_process', 0, 0);
+    session.id = 'session';
+    session.x = 230;
+    session.y = 180;
+    session.width = 160;
+    session.height = 70;
+    session.text = 'Buat Sesi Login';
+
+    const selesai = createElementFromShape('fc_terminator', 0, 0);
+    selesai.id = 'selesai';
+    selesai.x = 100;
+    selesai.y = 360;
+    selesai.width = 140;
+    selesai.height = 60;
+    selesai.text = 'Selesai';
+
+    // Existing vertical flow: Valid? -> Buat Sesi Login -> Selesai
+    /** @type {import('../types/schema.js').BoardElement} */
+    const cYa = {
+      id: 'c-ya',
+      type: 'connector',
+      x: 310,
+      y: 130,
+      width: 0,
+      height: 50,
+      strokeColor: '#22C55E',
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness: 0,
+      opacity: 1,
+      seed: 1,
+      text: 'Ya',
+      routing: 'elbow',
+      startMarker: 'none',
+      endMarker: 'filled_arrow',
+      startBinding: { elementId: 'valid', side: 'bottom', rx: 0.5, ry: 1 },
+      endBinding: { elementId: 'session', side: 'top', rx: 0.5, ry: 0 },
+    };
+
+    /** @type {import('../types/schema.js').BoardElement} */
+    const cToDone = {
+      id: 'c-to-done',
+      type: 'connector',
+      x: 310,
+      y: 250,
+      width: -120,
+      height: 110,
+      strokeColor: '#FFFFFF',
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness: 0,
+      opacity: 1,
+      seed: 2,
+      text: '',
+      routing: 'elbow',
+      startMarker: 'none',
+      endMarker: 'filled_arrow',
+      startBinding: { elementId: 'session', side: 'bottom', rx: 0.5, ry: 1 },
+      endBinding: { elementId: 'selesai', side: 'top', rx: 0.65, ry: 0 },
+      waypoints: [
+        { x: 310, y: 310 },
+        { x: 191, y: 310 },
+      ],
+    };
+
+    // Connector originally went Selesai(top) -> Valid?(left), now user dragged its end to Valid?(right)
+    /** @type {import('../types/schema.js').BoardElement} */
+    const cLoop = {
+      id: 'c-loop',
+      type: 'connector',
+      x: 130,
+      y: 360,
+      width: 250,
+      height: -275,
+      strokeColor: '#FFFFFF',
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness: 0,
+      opacity: 1,
+      seed: 3,
+      text: '',
+      routing: 'elbow',
+      startMarker: 'none',
+      endMarker: 'filled_arrow',
+      startBinding: { elementId: 'selesai', side: 'top', rx: 0.21, ry: 0 },
+      endBinding: { elementId: 'valid', side: 'right', rx: 1, ry: 0.5 },
+      waypoints: [{ x: 130, y: 85 }],
+    };
+
+    const base = [valid, session, selesai, cYa, cToDone, cLoop];
+    const validInner = {
+      x: valid.x + 4,
+      y: valid.y + 4,
+      width: valid.width - 8,
+      height: valid.height - 8,
+    };
+    const sessionInner = {
+      x: session.x + 4,
+      y: session.y + 4,
+      width: session.width - 8,
+      height: session.height - 8,
+    };
+    const selesaiInner = {
+      x: selesai.x + 4,
+      y: selesai.y + 4,
+      width: selesai.width - 8,
+      height: selesai.height - 8,
+    };
+
+    // Before rerouting, the stale left-side waypoint shoots straight through the interior of Valid?
+    const beforePath = computeConnectorPath(cLoop, new Map(base.map((e) => [e.id, e])));
+    const hitsValidBefore = beforePath.points
+      .slice(0, -1)
+      .some((pt, i) => orthoSegmentHitsRect(pt, beforePath.points[i + 1], validInner));
+    expect(hitsValidBefore).toBe(true);
+
+    const rerouted = rerouteSingleConnector(base, 'c-loop', {
+      pinnedEnd: 'end',
+      allowFlipOpposite: true,
+      preferredOppositeBinding: cLoop.startBinding,
+    });
+
+    const updated = rerouted.find((el) => el.id === 'c-loop');
+    expect(updated).toBeDefined();
+    // User's chosen right side on Valid? is strictly respected
+    expect(updated?.endBinding?.elementId).toBe('valid');
+    expect(updated?.endBinding?.side).toBe('right');
+    // Opposite start port on Selesai adapts cleanly to right or bottom instead of wrapping over the top
+    expect(['right', 'bottom']).toContain(updated?.startBinding?.side);
+
+    // Zero node collisions and zero wire crossings across the entire diagram
+    const afterAudit = auditDiagramConflicts(rerouted);
+    expect(afterAudit.nodeHits).toBe(0);
+    expect(afterAudit.edgeCrossings).toBe(0);
+
+    // No segment of the rerouted connector slices through Valid?, Buat Sesi Login, or Selesai
+    const map = new Map(rerouted.map((e) => [e.id, e]));
+    const path = computeConnectorPath(/** @type {import('../types/schema.js').BoardElement} */ (updated), map);
+    expect(path.points.length).toBeGreaterThanOrEqual(3);
+    for (let i = 0; i < path.points.length - 1; i += 1) {
+      expect(orthoSegmentHitsRect(path.points[i], path.points[i + 1], validInner)).toBe(false);
+      expect(orthoSegmentHitsRect(path.points[i], path.points[i + 1], sessionInner)).toBe(false);
+      expect(orthoSegmentHitsRect(path.points[i], path.points[i + 1], selesaiInner)).toBe(false);
+    }
+
+    // The final approach segment enters Valid?(right) cleanly from the right outside (x > valid.x + valid.width)
+    const approach = path.points[path.points.length - 2];
+    const tip = path.points[path.points.length - 1];
+    expect(approach.x).toBeGreaterThan(valid.x + valid.width);
+    expect(tip.x).toBeCloseTo(valid.x + valid.width, 1);
   });
 });

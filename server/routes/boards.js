@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS = {
   snapToGrid: true,
   autoCorrectShapes: true,
   syncSameType: true,
+  lineJumps: true,
 };
 
 /**

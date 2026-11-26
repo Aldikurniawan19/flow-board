@@ -100,6 +100,9 @@ function getSharedValue(list, getter) {
  */
 export function InspectorPanel({ open, onToggle }) {
   const [lockAspectRatio, setLockAspectRatio] = useState(false);
+  const [strokeStyleScope, setStrokeStyleScope] = useState(
+    /** @type {'selected' | 'all'} */ ('selected'),
+  );
   const [focusedDim, setFocusedDim] = useState(/** @type {'width' | 'height' | null} */ (null));
   const [widthDraft, setWidthDraft] = useState('');
   const [heightDraft, setHeightDraft] = useState('');
@@ -454,6 +457,31 @@ export function InspectorPanel({ open, onToggle }) {
                     aria-hidden="true"
                     className={`pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow-xs transition-transform duration-200 ${
                       syncSameType ? 'translate-x-[17px]' : 'translate-x-[2px]'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div
+                title="Saat aktif, garis konektor yang saling bersilang otomatis membentuk loncatan kerucut (/\\)"
+                className="flex items-center justify-between py-1 text-[#0F172A]"
+              >
+                <span>Loncatan Garis Bersilang</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings.lineJumps !== false}
+                  aria-label="Loncatan Garis Bersilang"
+                  onClick={() => updateSettings({ lineJumps: settings.lineJumps === false })}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+                    settings.lineJumps !== false
+                      ? 'border-transparent bg-[#1D4ED8]'
+                      : 'border-[#CBD5E1] bg-[#E2E8F0]'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow-xs transition-transform duration-200 ${
+                      settings.lineJumps !== false ? 'translate-x-[17px]' : 'translate-x-[2px]'
                     }`}
                   />
                 </button>
@@ -1047,6 +1075,32 @@ export function InspectorPanel({ open, onToggle }) {
                     )
                   }
                 />
+
+                <div
+                  title="Saat aktif, garis konektor yang saling bersilang otomatis membentuk loncatan kerucut (/\\)"
+                  className="flex items-center justify-between pt-1 text-[#0F172A]"
+                >
+                  <span>Loncatan Garis Bersilang</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={settings.lineJumps !== false}
+                    aria-label="Loncatan Garis Bersilang"
+                    onClick={() => updateSettings({ lineJumps: settings.lineJumps === false })}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+                      settings.lineJumps !== false
+                        ? 'border-transparent bg-[#1D4ED8]'
+                        : 'border-[#CBD5E1] bg-[#E2E8F0]'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow-xs transition-transform duration-200 ${
+                        settings.lineJumps !== false ? 'translate-x-[17px]' : 'translate-x-[2px]'
+                      }`}
+                    />
+                  </button>
+                </div>
               </section>
             )}
 
@@ -1328,7 +1382,41 @@ export function InspectorPanel({ open, onToggle }) {
 
               {styleLineElements.length > 0 && (
                 <div>
-                  <span className="block text-[#475569] mb-1">Pola Garis</span>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[#475569]">Pola Garis</span>
+                    <div
+                      role="group"
+                      aria-label="Cakupan pola garis"
+                      className="inline-flex rounded-md border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-[10px]"
+                    >
+                      <button
+                        type="button"
+                        aria-pressed={strokeStyleScope === 'selected'}
+                        title="Hanya ubah pola garis pada elemen yang diklik/dipilih"
+                        onClick={() => setStrokeStyleScope('selected')}
+                        className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                          strokeStyleScope === 'selected'
+                            ? 'bg-[#1D4ED8] text-white'
+                            : 'text-[#475569] hover:text-[#0F172A]'
+                        }`}
+                      >
+                        Terpilih
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={strokeStyleScope === 'all'}
+                        title="Ganti langsung pola garis semua garis/elemen sejenis di papan"
+                        onClick={() => setStrokeStyleScope('all')}
+                        className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                          strokeStyleScope === 'all'
+                            ? 'bg-[#1D4ED8] text-white'
+                            : 'text-[#475569] hover:text-[#0F172A]'
+                        }`}
+                      >
+                        Semua
+                      </button>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-3 gap-1">
                     {[
                       { id: 'solid', label: 'Solid' },
@@ -1344,7 +1432,9 @@ export function InspectorPanel({ open, onToggle }) {
                               el.type !== 'freehand' && el.type !== 'text'
                                 ? { strokeStyle: st.id }
                                 : null,
-                            { syncSameType: true },
+                            strokeStyleScope === 'all'
+                              ? { forceSyncSameType: true }
+                              : { syncSameType: false },
                           )
                         }
                         className={`py-1.5 rounded-md border font-medium ${
@@ -1424,7 +1514,7 @@ export function InspectorPanel({ open, onToggle }) {
               </div>
             </section>
 
-            {/* Rotation controls (works for single & multi-select shapes/symbols) */}
+            {/* Rotation controls (applies only to explicitly selected shape(s), never synced by type) */}
             {rotatableElements.length > 0 && (
               <section className="space-y-2 pt-2 border-t border-[#E2E8F0]">
                 <div className="flex items-center justify-between">
@@ -1445,12 +1535,10 @@ export function InspectorPanel({ open, onToggle }) {
                         const val = Number(e.target.value);
                         if (!Number.isFinite(val)) return;
                         const deg = normalizeRotation(val);
-                        updateSelectedElements(
-                          (el) =>
-                            el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                              ? { rotation: deg }
-                              : null,
-                          { syncSameType: true },
+                        updateSelectedElements((el) =>
+                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                            ? { rotation: deg }
+                            : null,
                         );
                       }}
                       className="w-16 rounded-md border border-[#E2E8F0] px-1.5 py-0.5 text-right font-mono-tabular text-xs text-[#0F172A] focus:border-[#1D4ED8] focus:outline-none"
@@ -1467,12 +1555,10 @@ export function InspectorPanel({ open, onToggle }) {
                   value={typeof sharedRotation === 'number' ? Math.round(sharedRotation) : 0}
                   onChange={(e) => {
                     const deg = normalizeRotation(Number(e.target.value));
-                    updateSelectedElements(
-                      (el) =>
-                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                          ? { rotation: deg }
-                          : null,
-                      { syncSameType: true },
+                    updateSelectedElements((el) =>
+                      el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                        ? { rotation: deg }
+                        : null,
                     );
                   }}
                   className="w-full accent-[#1D4ED8] cursor-pointer"
@@ -1482,12 +1568,10 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Putar 90° berlawanan jarum jam"
                     onClick={() =>
-                      updateSelectedElements(
-                        (el) =>
-                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                            ? { rotation: normalizeRotation((el.rotation || 0) - 90) }
-                            : null,
-                        { syncSameType: true },
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: normalizeRotation((el.rotation || 0) - 90) }
+                          : null,
                       )
                     }
                     className="inline-flex items-center justify-center gap-0.5 py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
@@ -1499,12 +1583,10 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Putar 45° berlawanan jarum jam"
                     onClick={() =>
-                      updateSelectedElements(
-                        (el) =>
-                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                            ? { rotation: normalizeRotation((el.rotation || 0) - 45) }
-                            : null,
-                        { syncSameType: true },
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: normalizeRotation((el.rotation || 0) - 45) }
+                          : null,
                       )
                     }
                     className="py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
@@ -1515,12 +1597,10 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Reset rotasi ke 0°"
                     onClick={() =>
-                      updateSelectedElements(
-                        (el) =>
-                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                            ? { rotation: 0 }
-                            : null,
-                        { syncSameType: true },
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: 0 }
+                          : null,
                       )
                     }
                     className={`py-1.5 rounded-md border font-mono-tabular font-medium ${
@@ -1535,12 +1615,10 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Putar 45° searah jarum jam"
                     onClick={() =>
-                      updateSelectedElements(
-                        (el) =>
-                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                            ? { rotation: normalizeRotation((el.rotation || 0) + 45) }
-                            : null,
-                        { syncSameType: true },
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: normalizeRotation((el.rotation || 0) + 45) }
+                          : null,
                       )
                     }
                     className="py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
@@ -1551,12 +1629,10 @@ export function InspectorPanel({ open, onToggle }) {
                     type="button"
                     title="Putar 90° searah jarum jam"
                     onClick={() =>
-                      updateSelectedElements(
-                        (el) =>
-                          el.type !== 'connector' && el.type !== 'freehand' && !el.locked
-                            ? { rotation: normalizeRotation((el.rotation || 0) + 90) }
-                            : null,
-                        { syncSameType: true },
+                      updateSelectedElements((el) =>
+                        el.type !== 'connector' && el.type !== 'freehand' && !el.locked
+                          ? { rotation: normalizeRotation((el.rotation || 0) + 90) }
+                          : null,
                       )
                     }
                     className="inline-flex items-center justify-center gap-0.5 py-1.5 rounded-md border border-[#E2E8F0] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] font-mono-tabular"
@@ -1566,7 +1642,7 @@ export function InspectorPanel({ open, onToggle }) {
                   </button>
                 </div>
                 <p className="text-[11px] text-[#475569]">
-                  Seret titik bulat di atas komponen untuk memutar bebas (tahan Shift untuk snap 15°).
+                  Seret ikon putar di sudut kanan atas komponen untuk memutar bebas (tahan Shift untuk snap 15°).
                 </p>
               </section>
             )}

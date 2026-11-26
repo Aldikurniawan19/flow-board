@@ -30,8 +30,10 @@ import {
   serializeBoardToJson,
 } from '../engine/exporter.js';
 import {
+  CONNECTOR_PRESETS,
   SHAPE_CATEGORIES,
   SHAPE_DEFINITIONS,
+  createConnectorFromPreset,
   createElementFromShape,
   morphElementShape,
 } from '../engine/shapeRegistry.js';
@@ -235,6 +237,7 @@ describe('exporter & Zod schema validation', () => {
         snapToGrid: true,
         autoCorrectShapes: true,
         syncSameType: true,
+        lineJumps: true,
       },
       elements: erdElements,
     });
@@ -501,10 +504,14 @@ describe('360-degree symbol rotation', () => {
     expect(pts?.[2].x).toBeCloseTo(200, 1);
     expect(pts?.[2].y).toBeCloseTo(192.5, 1);
 
-    // SVG export emits sharp miter-joined jump vertices
+    // SVG export emits sharp miter-joined jump vertices when lineJumps is enabled, and omits them when disabled
     const svg = exportToSvgString([vert, horiz]);
     expect(svg).toContain('stroke-linejoin="miter"');
     expect(svg).toContain('200.0,192.5');
+
+    const svgNoJumps = exportToSvgString([vert, horiz], { lineJumps: false });
+    expect(svgNoJumps).not.toContain('stroke-linejoin="miter"');
+    expect(svgNoJumps).not.toContain('200.0,192.5');
   });
 
   it('registers schema-valid Rich Picture, BPMN 2.0, UML 2.5, and Architecture symbols with SVG export', () => {
@@ -554,6 +561,20 @@ describe('360-degree symbol rotation', () => {
     expect(svg).toContain('</svg>');
     expect(svg).toContain('Konflik');
     expect(svg).toContain('App Server');
+
+    // Every connector preset produces a schema-valid connector with preview primitives
+    expect(CONNECTOR_PRESETS.length).toBeGreaterThanOrEqual(10);
+    for (const preset of CONNECTOR_PRESETS) {
+      expect(preset.preview.length, `${preset.id} must have preview primitives`).toBeGreaterThan(0);
+      const conn = createConnectorFromPreset(preset.id, 200, 150);
+      const parsed = ElementSchema.safeParse(conn);
+      expect(parsed.success, `${preset.id} must satisfy ElementSchema`).toBe(true);
+      expect(conn.type).toBe('connector');
+      expect(conn.routing).toBe(preset.routing);
+      expect(conn.strokeStyle).toBe(preset.strokeStyle);
+      expect(conn.startMarker).toBe(preset.startMarker);
+      expect(conn.endMarker).toBe(preset.endMarker);
+    }
   });
 });
 

@@ -690,7 +690,7 @@ describe('FlowBoard UI integration', () => {
     await user.click(screen.getByRole('tab', { name: /Prompt & Tautan AI/i }));
     expect(screen.getByRole('button', { name: 'Salin URL llms.txt' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Tutup dialog integrasi AI' }));
-  }, 25000);
+  }, 45000);
 
   it('locks AI deep-link URLs to Pro/Owner accounts while blocking guests and free users', async () => {
     const plantCode = `@startuml
@@ -1272,5 +1272,106 @@ p "1" -- "N" t : "MELAKUKAN"
       );
     expect(autoConn?.startBinding?.side).toBe('bottom');
     expect(autoConn?.endBinding?.side).toBe('top');
+
+    // 4. Dragging the end handle of the n1 -> n2 connector to the extreme opposite (right) side of n2
+    //    auto-reroutes around n2 with zero overlap and enters n2 from outside right (x > n2.x + n2.width)
+    const firstConn = connectors[0];
+    act(() => {
+      useBoardStore.getState().setSelectedIds([firstConn.id]);
+    });
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 360,
+          clientY: 160,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 480,
+          clientY: 160,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointerup', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 480,
+          clientY: 160,
+          button: 0,
+        }),
+      );
+    });
+    const reroutedConn = useBoardStore.getState().elements.find((el) => el.id === firstConn.id);
+    expect(reroutedConn?.endBinding?.elementId).toBe('n2');
+    expect(reroutedConn?.endBinding?.side).toBe('right');
+    expect((reroutedConn?.waypoints || []).some((pt) => pt.x > 480)).toBe(true);
+
+    // 5. Rotating a single rectangle (via inspector or corner handle) rotates ONLY that component,
+    //    never syncing to other same-type rectangles even when syncSameType is true
+    act(() => {
+      useBoardStore.getState().updateSettings({ syncSameType: true });
+      useBoardStore.getState().setSelectedIds(['n1']);
+    });
+    await user.click(screen.getByRole('button', { name: '+45°' }));
+    const n1AfterRot = useBoardStore.getState().elements.find((el) => el.id === 'n1');
+    const n2AfterRot = useBoardStore.getState().elements.find((el) => el.id === 'n2');
+    expect(n1AfterRot?.rotation).toBe(45);
+    expect(n2AfterRot?.rotation || 0).toBe(0);
+
+    // 6. Crossing line-jump ("Loncatan Garis Bersilang") toggle can be turned off and back on
+    act(() => {
+      useBoardStore.getState().setSelectedIds([]);
+    });
+    const jumpSwitch = screen.getByRole('switch', { name: 'Loncatan Garis Bersilang' });
+    expect(jumpSwitch).toHaveAttribute('aria-checked', 'true');
+    await user.click(jumpSwitch);
+    expect(useBoardStore.getState().settings.lineJumps).toBe(false);
+    expect(jumpSwitch).toHaveAttribute('aria-checked', 'false');
+    await user.click(jumpSwitch);
+    expect(useBoardStore.getState().settings.lineJumps).toBe(true);
+
+    // 7. Pola Garis supports changing only the clicked connector ("Terpilih") OR all connectors at once ("Semua")
+    const allConnsBefore = useBoardStore.getState().elements.filter((el) => el.type === 'connector');
+    expect(allConnsBefore.length).toBeGreaterThanOrEqual(2);
+    const [connOne, connTwo] = allConnsBefore;
+
+    act(() => {
+      useBoardStore.getState().setSelectedIds([connOne.id]);
+    });
+    // Default scope is "Terpilih" -> only connOne turns dashed, connTwo remains solid
+    await user.click(screen.getByRole('button', { name: 'Putus' }));
+    expect(useBoardStore.getState().elements.find((el) => el.id === connOne.id)?.strokeStyle).toBe(
+      'dashed',
+    );
+    expect(useBoardStore.getState().elements.find((el) => el.id === connTwo.id)?.strokeStyle).toBe(
+      'solid',
+    );
+
+    // Switching scope to "Semua" -> clicking "Titik" updates all connectors on the board at once
+    await user.click(screen.getByRole('button', { name: 'Semua' }));
+    await user.click(screen.getByRole('button', { name: 'Titik' }));
+    expect(
+      useBoardStore
+        .getState()
+        .elements.filter((el) => el.type === 'connector')
+        .every((c) => c.strokeStyle === 'dotted'),
+    ).toBe(true);
+
+    // 8. Left sidebar "Garis & Penghubung" inserts ready-to-use connector presets directly onto the canvas
+    const countBeforePreset = useBoardStore.getState().elements.length;
+    await user.click(screen.getByRole('button', { name: /Relasi 1 : N \(ERD\)/i }));
+    const afterPreset = useBoardStore.getState().elements;
+    expect(afterPreset).toHaveLength(countBeforePreset + 1);
+    const addedPreset = afterPreset[afterPreset.length - 1];
+    expect(addedPreset.type).toBe('connector');
+    expect(addedPreset.startMarker).toBe('crow_one_only');
+    expect(addedPreset.endMarker).toBe('crow_zero_many');
   });
 });

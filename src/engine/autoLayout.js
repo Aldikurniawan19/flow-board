@@ -1241,11 +1241,22 @@ function routeObstacleAvoidingOrtho(
   srcRect = null,
   dstRect = null,
 ) {
-  const stubDist = 28;
   const pad = 22;
   const endpointPad = 4;
-  const sStub = computeClearStub(start, startSide, srcRect, stubDist);
-  const eStub = computeClearStub(end, endSide, dstRect, stubDist);
+  let stubDist = 28;
+  if (srcRect && dstRect) {
+    const gapX = Math.max(dstRect.x - (srcRect.x + srcRect.width), srcRect.x - (dstRect.x + dstRect.width));
+    const gapY = Math.max(dstRect.y - (srcRect.y + srcRect.height), srcRect.y - (dstRect.y + dstRect.height));
+    const positiveGaps = [gapX, gapY].filter((g) => g > 0);
+    if (positiveGaps.length > 0) {
+      const minGap = Math.min(...positiveGaps);
+      if (minGap < 56) {
+        stubDist = Math.max(12, Math.floor(minGap / 2));
+      }
+    }
+  }
+  const sStub = srcRect ? computeClearStub(start, startSide, srcRect, stubDist) : start;
+  const eStub = dstRect ? computeClearStub(end, endSide, dstRect, stubDist) : end;
 
   // Include ALL nodes as solid obstacles (tight 4px pad on src/dst, generous 22px pad on all others)
   const activeObstacles = obstacles.map((o) => {
@@ -2686,6 +2697,313 @@ export function rerouteAffectedConnectors(elements, affectedNodeIds, options = {
   }
 
   placeConnectorLabelsCleanly(routedList, obstacles);
+
+  return nextElements;
+}
+
+/**
+ * Infer a natural orthogonal direction when an endpoint is unbound (free in canvas space).
+ * @param {Pt} from
+ * @param {Pt} to
+ * @returns {import('../types/schema.js').PortSide}
+ */
+function inferFallbackPortSide(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? 'right' : 'left';
+  }
+  return dy >= 0 ? 'bottom' : 'top';
+}
+
+/**
+ * Score a candidate orthogonal polyline for obstacle collisions, wire overlaps/crossings,
+ * bend count, and total Manhattan length.
+ * @param {Pt[]} path
+ * @param {Array<{ id: string, rect: Rect }>} obstacles
+ * @param {Set<string>} endpointIds
+ * @param {Array<{ a: Pt, b: Pt }>} usedSegments
+ */
+function scoreSingleConnectorPath(path, obstacles, endpointIds, usedSegments) {
+  let nodeHits = 0;
+  let overlaps = 0;
+  let crossings = 0;
+  let totalLen = 0;
+
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const a = path[i];
+    const b = path[i + 1];
+    const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+    totalLen += segLen;
+    if (segLen < 0.5) continue;
+
+    // Trim 2px inward from bound endpoints so touching the host shape's border never counts as a collision
+    const dx = (b.x - a.x) / segLen;
+    const dy = (b.y - a.y) / segLen;
+    const insetStart = i === 0 ? Math.min(2.5, segLen * 0.25) : 0;
+    const insetEnd = i === path.length - 2 ? Math.min(2.5, segLen * 0.25) : 0;
+    const ta = { x: a.x + dx * insetStart, y: a.y + dy * insetStart };
+    const tb = { x: b.x - dx * insetEnd, y: b.y - dy * insetEnd };
+
+    for (const obs of obstacles) {
+      const shrink = endpointIds.has(obs.id) ? -2 : 2;
+      const checkRect = {
+        x: obs.rect.x - shrink,
+        y: obs.rect.y - shrink,
+        width: Math.max(2, obs.rect.width + shrink * 2),
+        height: Math.max(2, obs.rect.height + shrink * 2),
+      };
+      if (orthoSegmentHitsRect(ta, tb, checkRect)) {
+        nodeHits += 1;
+      }
+    }
+
+    const horiz = Math.abs(a.y - b.y) < 0.8;
+    for (const seg of usedSegments) {
+      const segHoriz = Math.abs(seg.a.y - seg.b.y) < 0.8;
+      if (horiz && segHoriz && Math.abs(a.y - seg.a.y) < 10) {
+        const overlapLen =
+          Math.min(Math.max(a.x, b.x), Math.max(seg.a.x, seg.b.x)) -
+          Math.max(Math.min(a.x, b.x), Math.min(seg.a.x, seg.b.x));
+        if (overlapLen > 6) overlaps += 1;
+      } else if (!horiz && !segHoriz && Math.abs(a.x - seg.a.x) < 10) {
+        const overlapLen =
+          Math.min(Math.max(a.y, b.y), Math.max(seg.a.y, seg.b.y)) -
+          Math.max(Math.min(a.y, b.y), Math.min(seg.a.y, seg.b.y));
+        if (overlapLen > 6) overlaps += 1;
+      } else if (segmentsStrictlyCross(a, b, seg.a, seg.b)) {
+        crossings += 1;
+      }
+    }
+  }
+
+  const bends = Math.max(0, path.length - 2);
+  return nodeHits * 60000 + overlaps * 1600 + crossings * 520 + bends * 110 + totalLen;
+}
+
+/**
+ * Obstacle-avoiding interactive router for a single connector when the user draws it
+ * or drags either endpoint to a new (potentially extreme opposite) side.
+ *
+ * - Keeps the user-dragged endpoint (`pinnedEnd`) strictly fixed where placed.
+ * - When `allowFlipOpposite` is true, evaluates all 4 cardinal sides of the opposite bound shape
+ *   and switches to a cleaner side if doing so eliminates component overlap, crossings, or awkward wrap-around.
+ * - Routes orthogonal elbows around ALL connectable shapes (including source and target themselves).
+ *
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ * @param {string} connectorId
+ * @param {{
+ *   pinnedEnd?: 'start' | 'end' | 'both',
+ *   allowFlipOpposite?: boolean,
+ *   preferredOppositeBinding?: import('../types/schema.js').AnchorBinding | null,
+ *   repositionLabel?: boolean,
+ * }} [options]
+ * @returns {import('../types/schema.js').BoardElement[]}
+ */
+export function rerouteSingleConnector(elements, connectorId, options = {}) {
+  const {
+    pinnedEnd = 'both',
+    allowFlipOpposite = false,
+    preferredOppositeBinding = null,
+    repositionLabel = false,
+  } = options;
+
+  const connIndex = elements.findIndex((el) => el.id === connectorId && el.type === 'connector');
+  if (connIndex < 0) return elements;
+
+  const origConn = elements[connIndex];
+  if (origConn.locked) return elements;
+
+  const nextElements = elements.map((el, idx) => (idx === connIndex ? structuredClone(el) : el));
+  const conn = nextElements[connIndex];
+
+  /** @type {Map<string, import('../types/schema.js').BoardElement>} */
+  const nodeById = new Map();
+  /** @type {Array<{ id: string, rect: Rect }>} */
+  const obstacles = [];
+
+  for (const el of nextElements) {
+    if (isConnectableElement(el)) {
+      nodeById.set(el.id, el);
+      if (!CONTAINER_TYPES.has(el.type)) {
+        obstacles.push({ id: el.id, rect: getNormalizedRect(el) });
+      }
+    }
+  }
+
+  const srcNode = conn.startBinding ? nodeById.get(conn.startBinding.elementId) || null : null;
+  const dstNode = conn.endBinding ? nodeById.get(conn.endBinding.elementId) || null : null;
+
+  // Straight / curved connectors only need simple endpoint syncing unless we want to flip an occluded opposite port
+  if (conn.routing === 'straight' || conn.routing === 'curved') {
+    const startPt = srcNode && conn.startBinding ? resolveBindingPoint(srcNode, conn.startBinding) : { x: conn.x, y: conn.y };
+    const endPt = dstNode && conn.endBinding ? resolveBindingPoint(dstNode, conn.endBinding) : { x: conn.x + conn.width, y: conn.y + conn.height };
+    conn.x = startPt.x;
+    conn.y = startPt.y;
+    conn.width = endPt.x - startPt.x;
+    conn.height = endPt.y - startPt.y;
+    conn.waypoints = undefined;
+    return nextElements;
+  }
+
+  // Gather segments and side occupancy of all OTHER connectors so the new route avoids existing wires & crowded ports
+  /** @type {Array<{ a: Pt, b: Pt }>} */
+  const usedSegments = [];
+  /** @type {Set<string>} */
+  const occupiedSides = new Set();
+
+  for (const el of nextElements) {
+    if (el.type !== 'connector' || el.id === conn.id) continue;
+    if (el.startBinding) occupiedSides.add(`${el.startBinding.elementId}:${el.startBinding.side}`);
+    if (el.endBinding) occupiedSides.add(`${el.endBinding.elementId}:${el.endBinding.side}`);
+    const pts = resolveConnectorAuditPolyline(el, nodeById);
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      usedSegments.push({ a: pts[i], b: pts[i + 1] });
+    }
+  }
+
+  /** @type {import('../types/schema.js').PortSide[]} */
+  const ALL_SIDES = ['top', 'right', 'bottom', 'left'];
+
+  /**
+   * @typedef {{
+   *   startBinding: import('../types/schema.js').AnchorBinding | null,
+   *   endBinding: import('../types/schema.js').AnchorBinding | null,
+   *   isPreferred: boolean,
+   *   flippedOppositeKey: string | null,
+   * }} BindingCandidate
+   */
+
+  /** @type {BindingCandidate[]} */
+  const candidates = [];
+
+  if (allowFlipOpposite && pinnedEnd === 'end' && srcNode && conn.startBinding) {
+    const pref =
+      preferredOppositeBinding && preferredOppositeBinding.elementId === srcNode.id
+        ? preferredOppositeBinding
+        : conn.startBinding;
+    candidates.push({
+      startBinding: { ...pref },
+      endBinding: conn.endBinding ? { ...conn.endBinding } : null,
+      isPreferred: true,
+      flippedOppositeKey: `${srcNode.id}:${pref.side}`,
+    });
+    for (const side of ALL_SIDES) {
+      if (side === pref.side) continue;
+      const anch = computeSideAnchorNormalized(srcNode, side, 0.5);
+      candidates.push({
+        startBinding: { elementId: srcNode.id, side, rx: anch.rx, ry: anch.ry },
+        endBinding: conn.endBinding ? { ...conn.endBinding } : null,
+        isPreferred: false,
+        flippedOppositeKey: `${srcNode.id}:${side}`,
+      });
+    }
+  } else if (allowFlipOpposite && pinnedEnd === 'start' && dstNode && conn.endBinding) {
+    const pref =
+      preferredOppositeBinding && preferredOppositeBinding.elementId === dstNode.id
+        ? preferredOppositeBinding
+        : conn.endBinding;
+    candidates.push({
+      startBinding: conn.startBinding ? { ...conn.startBinding } : null,
+      endBinding: { ...pref },
+      isPreferred: true,
+      flippedOppositeKey: `${dstNode.id}:${pref.side}`,
+    });
+    for (const side of ALL_SIDES) {
+      if (side === pref.side) continue;
+      const anch = computeSideAnchorNormalized(dstNode, side, 0.5);
+      candidates.push({
+        startBinding: conn.startBinding ? { ...conn.startBinding } : null,
+        endBinding: { elementId: dstNode.id, side, rx: anch.rx, ry: anch.ry },
+        isPreferred: false,
+        flippedOppositeKey: `${dstNode.id}:${side}`,
+      });
+    }
+  } else {
+    candidates.push({
+      startBinding: conn.startBinding ? { ...conn.startBinding } : null,
+      endBinding: conn.endBinding ? { ...conn.endBinding } : null,
+      isPreferred: true,
+      flippedOppositeKey: null,
+    });
+  }
+
+  /** @type {Set<string>} */
+  const endpointIds = new Set();
+  if (srcNode) endpointIds.add(srcNode.id);
+  if (dstNode) endpointIds.add(dstNode.id);
+
+  const srcRect = srcNode ? getNormalizedRect(srcNode) : null;
+  const dstRect = dstNode ? getNormalizedRect(dstNode) : null;
+
+  let bestScore = Infinity;
+  /** @type {{ path: Pt[], startBinding: import('../types/schema.js').AnchorBinding | null, endBinding: import('../types/schema.js').AnchorBinding | null } | null} */
+  let bestResult = null;
+
+  for (const cand of candidates) {
+    const startPt =
+      srcNode && cand.startBinding
+        ? resolveBindingPoint(srcNode, cand.startBinding)
+        : { x: conn.x, y: conn.y };
+    const endPt =
+      dstNode && cand.endBinding
+        ? resolveBindingPoint(dstNode, cand.endBinding)
+        : { x: conn.x + conn.width, y: conn.y + conn.height };
+
+    const sSide = cand.startBinding?.side || inferFallbackPortSide(startPt, endPt);
+    const eSide = cand.endBinding?.side || inferFallbackPortSide(endPt, startPt);
+
+    const rawPath = routeObstacleAvoidingOrtho(
+      startPt,
+      endPt,
+      sSide,
+      eSide,
+      obstacles,
+      endpointIds,
+      usedSegments,
+      srcRect,
+      dstRect,
+    );
+    const clean = simplifyOrthoPath(rawPath);
+    let score = scoreSingleConnectorPath(clean, obstacles, endpointIds, usedSegments);
+
+    // Mild hysteresis keeps the user's original opposite port steady when it is already clean
+    if (!cand.isPreferred) {
+      score += 75;
+    }
+    // Slight preference for an unoccupied port side on the opposite node
+    if (cand.flippedOppositeKey && occupiedSides.has(cand.flippedOppositeKey)) {
+      score += 90;
+    }
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestResult = {
+        path: clean,
+        startBinding: cand.startBinding,
+        endBinding: cand.endBinding,
+      };
+    }
+  }
+
+  if (bestResult && bestResult.path.length >= 2) {
+    const first = bestResult.path[0];
+    const last = bestResult.path[bestResult.path.length - 1];
+    conn.x = first.x;
+    conn.y = first.y;
+    conn.width = last.x - first.x;
+    conn.height = last.y - first.y;
+    conn.startBinding = bestResult.startBinding;
+    conn.endBinding = bestResult.endBinding;
+    const interior = bestResult.path.slice(1, -1);
+    conn.waypoints = interior.length > 0 ? interior : undefined;
+
+    if (repositionLabel && conn.text && conn.text.trim()) {
+      placeConnectorLabelsCleanly([{ connector: conn, path: bestResult.path }], obstacles);
+    } else if (!repositionLabel) {
+      conn.labelPos = null;
+    }
+  }
 
   return nextElements;
 }

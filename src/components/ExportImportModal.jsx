@@ -59,6 +59,7 @@ export function ExportImportModal({ open, onClose }) {
       const blob = await exportToPngBlob(elements, {
         background: transparentBg ? 'transparent' : solidBg,
         scale: 2,
+        lineJumps: settings.lineJumps !== false,
       });
       triggerDownload(blob, `${safeSlug}.png`);
       setFeedback({ type: 'success', message: 'Diagram berhasil diekspor ke PNG.' });
@@ -74,6 +75,7 @@ export function ExportImportModal({ open, onClose }) {
     try {
       const svg = exportToSvgString(elements, {
         background: transparentBg ? 'transparent' : '#FFFFFF',
+        lineJumps: settings.lineJumps !== false,
       });
       const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
       triggerDownload(blob, `${safeSlug}.svg`);

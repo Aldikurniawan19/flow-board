@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { GRID_SIZE } from '../constants/tokens.js';
-import { rerouteAffectedConnectors } from '../engine/autoLayout.js';
+import { rerouteAffectedConnectors, rerouteSingleConnector } from '../engine/autoLayout.js';
 import { screenToWorld, snapValue, worldToScreen, zoomAtPoint } from '../engine/camera.js';
 import { renderCanvasScene } from '../engine/canvasRenderer.js';
 import {
@@ -26,7 +26,11 @@ import {
 } from '../engine/ports.js';
 import { computeConnectorPath } from '../engine/router.js';
 import { recognizeFreehandShape } from '../engine/shapeRecognizer.js';
-import { createElementFromShape, morphElementShape } from '../engine/shapeRegistry.js';
+import {
+  createConnectorFromPreset,
+  createElementFromShape,
+  morphElementShape,
+} from '../engine/shapeRegistry.js';
 import { useBoardStore } from '../store/useBoardStore.js';
 import { QuickConnectMenu } from './QuickConnectMenu.jsx';
 import { ShapeContextMenu } from './ShapeContextMenu.jsx';
@@ -564,12 +568,24 @@ export function WhiteboardCanvas() {
           const r = 10 / store.camera.zoom;
           if (Math.hypot(world.x - start.x, world.y - start.y) <= r) {
             store.commitSnapshot();
-            interactionRef.current = { mode: 'drag-connector-end', id: sel.id, which: 'start' };
+            interactionRef.current = {
+              mode: 'drag-connector-end',
+              id: sel.id,
+              which: 'start',
+              initialStartBinding: sel.startBinding ? { ...sel.startBinding } : null,
+              initialEndBinding: sel.endBinding ? { ...sel.endBinding } : null,
+            };
             return;
           }
           if (Math.hypot(world.x - end.x, world.y - end.y) <= r) {
             store.commitSnapshot();
-            interactionRef.current = { mode: 'drag-connector-end', id: sel.id, which: 'end' };
+            interactionRef.current = {
+              mode: 'drag-connector-end',
+              id: sel.id,
+              which: 'end',
+              initialStartBinding: sel.startBinding ? { ...sel.startBinding } : null,
+              initialEndBinding: sel.endBinding ? { ...sel.endBinding } : null,
+            };
             return;
           }
 
@@ -641,12 +657,15 @@ export function WhiteboardCanvas() {
           const rect = getNormalizedRect(sel);
           const rot = sel.rotation || 0;
           if (hitTestRotationHandle(world, rect, store.camera.zoom, rot)) {
+            const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
             store.commitSnapshot();
             interactionRef.current = {
               mode: 'rotate',
               id: sel.id,
               elementType: sel.type,
-              center: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
+              center,
+              initialRotation: rot,
+              startAngle: Math.atan2(world.y - center.y, world.x - center.x),
             };
             setCursorStyle('grabbing');
             return;
@@ -1041,20 +1060,25 @@ export function WhiteboardCanvas() {
             x: snapValue(world.x, GRID_SIZE, store.settings.snapToGrid),
             y: snapValue(world.y, GRID_SIZE, store.settings.snapToGrid),
           };
-      store.setElementsLive((els) =>
-        els.map((el) =>
+      store.setElementsLive((els) => {
+        const updated = els.map((el) =>
           el.id === interaction.id
             ? {
                 ...el,
                 width: endPt.x - el.x,
                 height: endPt.y - el.y,
+                waypoints: undefined,
                 endBinding: port
                   ? { elementId: port.elementId, side: port.side, rx: port.rx, ry: port.ry }
                   : null,
               }
             : el,
-        ),
-      );
+        );
+        return rerouteSingleConnector(updated, interaction.id, {
+          pinnedEnd: 'both',
+          allowFlipOpposite: false,
+        });
+      });
       return;
     }
 
@@ -1106,8 +1130,8 @@ export function WhiteboardCanvas() {
             x: snapValue(world.x, GRID_SIZE, store.settings.snapToGrid),
             y: snapValue(world.y, GRID_SIZE, store.settings.snapToGrid),
           };
-      store.setElementsLive((els) =>
-        els.map((el) => {
+      store.setElementsLive((els) => {
+        const updated = els.map((el) => {
           if (el.id !== interaction.id) return el;
           const nextBinding = port
             ? { elementId: port.elementId, side: port.side, rx: port.rx, ry: port.ry }
@@ -1122,6 +1146,7 @@ export function WhiteboardCanvas() {
               width: endX - targetPt.x,
               height: endY - targetPt.y,
               startBinding: nextBinding,
+              waypoints: undefined,
               labelPos: null,
             };
           }
@@ -1130,10 +1155,19 @@ export function WhiteboardCanvas() {
             width: targetPt.x - el.x,
             height: targetPt.y - el.y,
             endBinding: nextBinding,
+            waypoints: undefined,
             labelPos: null,
           };
-        }),
-      );
+        });
+        return rerouteSingleConnector(updated, interaction.id, {
+          pinnedEnd: interaction.which,
+          allowFlipOpposite: true,
+          preferredOppositeBinding:
+            interaction.which === 'end'
+              ? interaction.initialStartBinding
+              : interaction.initialEndBinding,
+        });
+      });
       return;
     }
 
@@ -1177,7 +1211,9 @@ export function WhiteboardCanvas() {
 
     if (interaction.mode === 'rotate') {
       const { center } = interaction;
-      const rawDeg = (Math.atan2(world.y - center.y, world.x - center.x) * 180) / Math.PI + 90;
+      const curAngle = Math.atan2(world.y - center.y, world.x - center.x);
+      const deltaDeg = ((curAngle - interaction.startAngle) * 180) / Math.PI;
+      const rawDeg = (interaction.initialRotation || 0) + deltaDeg;
       let nextDeg = normalizeRotation(rawDeg);
       if (e.shiftKey) {
         nextDeg = normalizeRotation(Math.round(nextDeg / 15) * 15);
@@ -1190,21 +1226,11 @@ export function WhiteboardCanvas() {
           nextDeg = normalizeRotation(Math.round(nextDeg));
         }
       }
-      const syncSameType = store.settings.syncSameType !== false;
       store.setElementsLive((els) => {
-        /** @type {Set<string>} */
-        const rotatedIds = new Set();
-        const updated = els.map((el) => {
-          if (el.id === interaction.id) {
-            rotatedIds.add(el.id);
-            return { ...el, rotation: nextDeg };
-          }
-          if (syncSameType && el.type === interaction.elementType && !el.locked) {
-            rotatedIds.add(el.id);
-            return { ...el, rotation: nextDeg };
-          }
-          return el;
-        });
+        const rotatedIds = new Set([interaction.id]);
+        const updated = els.map((el) =>
+          el.id === interaction.id ? { ...el, rotation: nextDeg } : el,
+        );
         interaction.affectedNodeIds = rotatedIds;
         return rerouteAffectedConnectors(updated, rotatedIds, { fast: true });
       });
@@ -1505,7 +1531,19 @@ export function WhiteboardCanvas() {
           rerouteAffectedConnectors(els, interaction.affectedNodeIds, { fast: false }),
         );
       }
-      if (interaction.mode === 'draw-connector') {
+      if (interaction.mode === 'drag-connector-end') {
+        store.setElementsLive((els) =>
+          rerouteSingleConnector(els, interaction.id, {
+            pinnedEnd: interaction.which,
+            allowFlipOpposite: true,
+            preferredOppositeBinding:
+              interaction.which === 'end'
+                ? interaction.initialStartBinding
+                : interaction.initialEndBinding,
+            repositionLabel: true,
+          }),
+        );
+      } else if (interaction.mode === 'draw-connector') {
         if (interaction.fromQuickConnect) {
           const created = store.elements.find((el) => el.id === interaction.id);
           if (
@@ -1526,6 +1564,13 @@ export function WhiteboardCanvas() {
             return;
           }
         }
+        store.setElementsLive((els) =>
+          rerouteSingleConnector(els, interaction.id, {
+            pinnedEnd: 'both',
+            allowFlipOpposite: false,
+            repositionLabel: true,
+          }),
+        );
         setCursorStyle('default');
         store.setActiveTool('select');
       }
@@ -1606,16 +1651,22 @@ export function WhiteboardCanvas() {
   /** @param {import('react').DragEvent<HTMLCanvasElement>} e */
   function handleDrop(e) {
     e.preventDefault();
+    const connectorPresetId = e.dataTransfer.getData('application/x-flowboard-connector');
     const shapeType = e.dataTransfer.getData('application/x-flowboard-shape');
-    if (!shapeType) return;
+    if (!connectorPresetId && !shapeType) return;
     const store = useBoardStore.getState();
     const screen = getScreenPoint(e);
     const world = screenToWorld(screen.x, screen.y, store.camera);
     const sx = snapValue(world.x, GRID_SIZE, store.settings.snapToGrid);
     const sy = snapValue(world.y, GRID_SIZE, store.settings.snapToGrid);
-    const el = createElementFromShape(shapeType, sx, sy, {
-      renderMode: store.settings.renderMode,
-    });
+    const el = connectorPresetId
+      ? createConnectorFromPreset(connectorPresetId, sx, sy, {
+          renderMode: store.settings.renderMode,
+          strokeColor: store.defaultStrokeColor,
+        })
+      : createElementFromShape(shapeType, sx, sy, {
+          renderMode: store.settings.renderMode,
+        });
     store.addElement(el);
     store.setActiveTool('select');
   }
@@ -1708,7 +1759,12 @@ export function WhiteboardCanvas() {
     };
 
     store.commitSnapshot();
-    store.setElementsLive((els) => [...els, newEl, conn]);
+    store.setElementsLive((els) =>
+      rerouteSingleConnector([...els, newEl, conn], conn.id, {
+        pinnedEnd: 'both',
+        allowFlipOpposite: false,
+      }),
+    );
     store.setSelectedIds([newEl.id]);
     store.scheduleAutosave();
 

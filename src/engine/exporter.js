@@ -65,7 +65,7 @@ export function computeSceneBounds(elements) {
 /**
  * Export elements to a high-DPI PNG Blob using an offscreen Canvas.
  * @param {import('../types/schema.js').BoardElement[]} elements
- * @param {{ background?: string, scale?: number }} [options]
+ * @param {{ background?: string, scale?: number, lineJumps?: boolean }} [options]
  * @returns {Promise<Blob>}
  */
 export async function exportToPngBlob(elements, options = {}) {
@@ -90,7 +90,8 @@ export async function exportToPngBlob(elements, options = {}) {
   ctx.translate(-bounds.x, -bounds.y);
   const rc = rough.canvas(canvas);
   const elementsById = new Map(elements.map((e) => [e.id, e]));
-  const jumpPointsMap = computeConnectorJumpPointsMap(elements, elementsById);
+  const jumpPointsMap =
+    options.lineJumps !== false ? computeConnectorJumpPointsMap(elements, elementsById) : new Map();
 
   const restorePalette = isDarkBg ? patchDarkCanvasPalette(ctx) : () => {};
   try {
@@ -137,7 +138,7 @@ export async function exportToPngBlob(elements, options = {}) {
 /**
  * Export elements to a self-contained, XML-safe SVG string.
  * @param {import('../types/schema.js').BoardElement[]} elements
- * @param {{ background?: string }} [options]
+ * @param {{ background?: string, lineJumps?: boolean }} [options]
  * @returns {string}
  */
 export function exportToSvgString(elements, options = {}) {
@@ -329,7 +330,8 @@ export function exportToSvgString(elements, options = {}) {
     if (rot) parts.push('</g>');
   }
 
-  const svgJumpMap = computeConnectorJumpPointsMap(elements, elementsById);
+  const svgJumpMap =
+    options.lineJumps !== false ? computeConnectorJumpPointsMap(elements, elementsById) : new Map();
   /** @type {string[]} */
   const svgLabels = [];
   for (const el of elements) {

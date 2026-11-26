@@ -429,7 +429,10 @@ export function renderCanvasScene(canvas, state) {
 
   const rc = rough.canvas(canvas);
   const elementsById = new Map(state.elements.map((el) => [el.id, el]));
-  const jumpPointsMap = computeConnectorJumpPointsMap(state.elements, elementsById);
+  const jumpPointsMap =
+    state.settings.lineJumps !== false
+      ? computeConnectorJumpPointsMap(state.elements, elementsById)
+      : new Map();
 
   const restorePalette = isDark ? patchDarkCanvasPalette(ctx) : () => {};
   try {

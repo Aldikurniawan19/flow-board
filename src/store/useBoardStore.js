@@ -92,6 +92,7 @@ const DEFAULT_SETTINGS = {
   snapToGrid: true,
   autoCorrectShapes: true,
   syncSameType: true,
+  lineJumps: true,
 };
 
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -846,7 +847,8 @@ export const useBoardStore = create((set, get) => ({
     const selectedSet = new Set(selectedIds);
     if (selectedSet.size === 0) return;
     const shouldSyncSameType =
-      Boolean(options.syncSameType) && settings.syncSameType !== false;
+      Boolean(options.forceSyncSameType) ||
+      (Boolean(options.syncSameType) && settings.syncSameType !== false);
 
     set((state) => {
       /** @type {Set<string>} */

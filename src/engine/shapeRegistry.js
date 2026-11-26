@@ -3290,3 +3290,243 @@ export function drawShapeElement(ctx, rc, el) {
 
   ctx.restore();
 }
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   label: string,
+ *   keywords: string[],
+ *   routing: import('../types/schema.js').RoutingMode,
+ *   strokeStyle: import('../types/schema.js').StrokeStyle,
+ *   startMarker: import('../types/schema.js').MarkerType,
+ *   endMarker: import('../types/schema.js').MarkerType,
+ *   width: number,
+ *   height: number,
+ *   preview: PreviewPrimitive[],
+ * }} ConnectorPreset
+ */
+
+/** @type {ConnectorPreset[]} */
+export const CONNECTOR_PRESETS = [
+  {
+    id: 'conn_arrow_straight',
+    label: 'Panah Lurus',
+    keywords: ['garis', 'panah', 'arrow', 'lurus', 'straight', 'konektor', 'penghubung', 'aliran'],
+    routing: 'straight',
+    strokeStyle: 'solid',
+    startMarker: 'none',
+    endMarker: 'filled_arrow',
+    width: 150,
+    height: 0,
+    preview: [
+      { kind: 'line', props: { x1: 5, y1: 16, x2: 32, y2: 16 } },
+      { kind: 'polygon', props: { points: '35,16 28,12 28,20', fill: 'currentColor' } },
+    ],
+  },
+  {
+    id: 'conn_elbow_arrow',
+    label: 'Panah Siku 90°',
+    keywords: ['garis', 'panah', 'siku', 'elbow', 'orthogonal', 'flowchart', 'dfd', 'penghubung'],
+    routing: 'elbow',
+    strokeStyle: 'solid',
+    startMarker: 'none',
+    endMarker: 'filled_arrow',
+    width: 140,
+    height: 60,
+    preview: [
+      { kind: 'path', props: { d: 'M 5 9 H 20 V 23 H 32' } },
+      { kind: 'polygon', props: { points: '35,23 28,19 28,27', fill: 'currentColor' } },
+    ],
+  },
+  {
+    id: 'conn_curved_arrow',
+    label: 'Panah Kurva',
+    keywords: ['garis', 'panah', 'kurva', 'curved', 'lengkung', 'penghubung'],
+    routing: 'curved',
+    strokeStyle: 'solid',
+    startMarker: 'none',
+    endMarker: 'filled_arrow',
+    width: 140,
+    height: 60,
+    preview: [
+      { kind: 'path', props: { d: 'M 5 23 C 16 23, 20 9, 32 9' } },
+      { kind: 'polygon', props: { points: '35,9 28,5 28,13', fill: 'currentColor' } },
+    ],
+  },
+  {
+    id: 'conn_line_plain',
+    label: 'Garis Polos',
+    keywords: ['garis', 'polos', 'line', 'asosiasi', 'association', 'penghubung'],
+    routing: 'straight',
+    strokeStyle: 'solid',
+    startMarker: 'none',
+    endMarker: 'none',
+    width: 150,
+    height: 0,
+    preview: [{ kind: 'line', props: { x1: 5, y1: 16, x2: 35, y2: 16 } }],
+  },
+  {
+    id: 'conn_bidirectional',
+    label: 'Panah Dua Arah',
+    keywords: ['garis', 'panah', 'dua arah', 'bidirectional', 'bolak balik', 'sinkron'],
+    routing: 'straight',
+    strokeStyle: 'solid',
+    startMarker: 'filled_arrow',
+    endMarker: 'filled_arrow',
+    width: 150,
+    height: 0,
+    preview: [
+      { kind: 'line', props: { x1: 9, y1: 16, x2: 31, y2: 16 } },
+      { kind: 'polygon', props: { points: '5,16 12,12 12,20', fill: 'currentColor' } },
+      { kind: 'polygon', props: { points: '35,16 28,12 28,20', fill: 'currentColor' } },
+    ],
+  },
+  {
+    id: 'conn_dashed_arrow',
+    label: 'Putus-Putus Panah',
+    keywords: ['garis', 'putus', 'dashed', 'dependensi', 'dependency', 'pesan', 'tidak', 'uml', 'bpmn'],
+    routing: 'elbow',
+    strokeStyle: 'dashed',
+    startMarker: 'none',
+    endMarker: 'arrow',
+    width: 140,
+    height: 44,
+    preview: [
+      { kind: 'path', props: { d: 'M 5 10 H 20 V 22 H 33', strokeDasharray: '3 2.5' } },
+      { kind: 'path', props: { d: 'M 28 18 L 34 22 L 28 26' } },
+    ],
+  },
+  {
+    id: 'conn_uml_inherit',
+    label: 'Pewarisan (UML)',
+    keywords: ['garis', 'uml', 'pewarisan', 'inheritance', 'extends', 'generalisasi'],
+    routing: 'elbow',
+    strokeStyle: 'solid',
+    startMarker: 'none',
+    endMarker: 'hollow_triangle',
+    width: 140,
+    height: 0,
+    preview: [
+      { kind: 'line', props: { x1: 5, y1: 16, x2: 27, y2: 16 } },
+      { kind: 'polygon', props: { points: '35,16 27,11 27,21' } },
+    ],
+  },
+  {
+    id: 'conn_uml_realize',
+    label: 'Implementasi (UML)',
+    keywords: ['garis', 'uml', 'implementasi', 'realization', 'implements', 'interface', 'putus'],
+    routing: 'elbow',
+    strokeStyle: 'dashed',
+    startMarker: 'none',
+    endMarker: 'hollow_triangle',
+    width: 140,
+    height: 0,
+    preview: [
+      { kind: 'line', props: { x1: 5, y1: 16, x2: 27, y2: 16, strokeDasharray: '3 2.5' } },
+      { kind: 'polygon', props: { points: '35,16 27,11 27,21' } },
+    ],
+  },
+  {
+    id: 'conn_uml_aggregate',
+    label: 'Agregasi (UML)',
+    keywords: ['garis', 'uml', 'agregasi', 'aggregation', 'belah ketupat'],
+    routing: 'straight',
+    strokeStyle: 'solid',
+    startMarker: 'hollow_diamond',
+    endMarker: 'none',
+    width: 150,
+    height: 0,
+    preview: [
+      { kind: 'polygon', props: { points: '5,16 11,12 17,16 11,20' } },
+      { kind: 'line', props: { x1: 17, y1: 16, x2: 35, y2: 16 } },
+    ],
+  },
+  {
+    id: 'conn_uml_compose',
+    label: 'Komposisi (UML)',
+    keywords: ['garis', 'uml', 'komposisi', 'composition', 'belah ketupat'],
+    routing: 'straight',
+    strokeStyle: 'solid',
+    startMarker: 'filled_diamond',
+    endMarker: 'none',
+    width: 150,
+    height: 0,
+    preview: [
+      { kind: 'polygon', props: { points: '5,16 11,12 17,16 11,20', fill: 'currentColor' } },
+      { kind: 'line', props: { x1: 17, y1: 16, x2: 35, y2: 16 } },
+    ],
+  },
+  {
+    id: 'conn_erd_one_to_many',
+    label: 'Relasi 1 : N (ERD)',
+    keywords: ['garis', 'erd', 'relasi', 'crow', 'one to many', '1:n', 'kardinalitas', 'basis data'],
+    routing: 'elbow',
+    strokeStyle: 'solid',
+    startMarker: 'crow_one_only',
+    endMarker: 'crow_zero_many',
+    width: 150,
+    height: 0,
+    preview: [
+      { kind: 'line', props: { x1: 5, y1: 16, x2: 35, y2: 16 } },
+      { kind: 'line', props: { x1: 9, y1: 11, x2: 9, y2: 21 } },
+      { kind: 'line', props: { x1: 13, y1: 11, x2: 13, y2: 21 } },
+      { kind: 'circle', props: { cx: 24, cy: 16, r: 2.5 } },
+      { kind: 'line', props: { x1: 28, y1: 16, x2: 35, y2: 11 } },
+      { kind: 'line', props: { x1: 28, y1: 16, x2: 35, y2: 21 } },
+    ],
+  },
+  {
+    id: 'conn_erd_many_to_many',
+    label: 'Relasi N : M (ERD)',
+    keywords: ['garis', 'erd', 'relasi', 'crow', 'many to many', 'n:m', 'kardinalitas', 'basis data'],
+    routing: 'elbow',
+    strokeStyle: 'solid',
+    startMarker: 'crow_many',
+    endMarker: 'crow_many',
+    width: 150,
+    height: 0,
+    preview: [
+      { kind: 'line', props: { x1: 5, y1: 16, x2: 35, y2: 16 } },
+      { kind: 'line', props: { x1: 12, y1: 16, x2: 5, y2: 11 } },
+      { kind: 'line', props: { x1: 12, y1: 16, x2: 5, y2: 21 } },
+      { kind: 'line', props: { x1: 28, y1: 16, x2: 35, y2: 11 } },
+      { kind: 'line', props: { x1: 28, y1: 16, x2: 35, y2: 21 } },
+    ],
+  },
+];
+
+/**
+ * Create a ready-to-use BoardElement connector centered at (cx, cy) from a preset ID.
+ * @param {string} presetId
+ * @param {number} cx
+ * @param {number} cy
+ * @param {{ renderMode?: 'clean' | 'sketch', strokeColor?: string }} [options]
+ * @returns {import('../types/schema.js').BoardElement}
+ */
+export function createConnectorFromPreset(presetId, cx, cy, options = {}) {
+  const preset = CONNECTOR_PRESETS.find((p) => p.id === presetId) || CONNECTOR_PRESETS[0];
+  const isSketch = options.renderMode === 'sketch';
+  return {
+    id: crypto.randomUUID(),
+    type: 'connector',
+    x: Math.round(cx - preset.width / 2),
+    y: Math.round(cy - preset.height / 2),
+    width: preset.width,
+    height: preset.height,
+    strokeColor: options.strokeColor || '#0F172A',
+    fillColor: 'transparent',
+    strokeWidth: 2,
+    strokeStyle: preset.strokeStyle,
+    roughness: isSketch ? 1.3 : 0,
+    opacity: 1,
+    seed: Math.floor(Math.random() * 1000000) + 1,
+    text: '',
+    fontSize: 12,
+    fontFamily: isSketch ? 'sketch' : 'sans',
+    routing: preset.routing,
+    startMarker: preset.startMarker,
+    endMarker: preset.endMarker,
+    startBinding: null,
+    endBinding: null,
+  };
+}

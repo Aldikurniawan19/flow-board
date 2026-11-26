@@ -7,7 +7,13 @@ import {
   PanelLeftOpen,
   Search,
 } from 'lucide-react';
-import { SHAPE_CATEGORIES, SHAPE_DEFINITIONS, createElementFromShape } from '../engine/shapeRegistry.js';
+import {
+  CONNECTOR_PRESETS,
+  SHAPE_CATEGORIES,
+  SHAPE_DEFINITIONS,
+  createConnectorFromPreset,
+  createElementFromShape,
+} from '../engine/shapeRegistry.js';
 import { STARTER_TEMPLATES } from '../constants/templates.js';
 import { useBoardStore } from '../store/useBoardStore.js';
 
@@ -47,6 +53,7 @@ export function ShapeLibrarySidebar({ open, onToggle }) {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(() => ({
     basic: true,
+    connectors: true,
     rich_picture: true,
     flowchart: false,
     bpmn: false,
@@ -58,6 +65,7 @@ export function ShapeLibrarySidebar({ open, onToggle }) {
 
   const activeTool = useBoardStore((s) => s.activeTool);
   const renderMode = useBoardStore((s) => s.settings.renderMode);
+  const defaultStrokeColor = useBoardStore((s) => s.defaultStrokeColor);
   const camera = useBoardStore((s) => s.camera);
   const setActiveTool = useBoardStore((s) => s.setActiveTool);
   const addElement = useBoardStore((s) => s.addElement);
@@ -65,8 +73,18 @@ export function ShapeLibrarySidebar({ open, onToggle }) {
 
   const normalizedQuery = query.trim().toLowerCase();
 
+  const filteredConnectors = useMemo(() => {
+    if (!normalizedQuery) return CONNECTOR_PRESETS;
+    return CONNECTOR_PRESETS.filter(
+      (preset) =>
+        preset.label.toLowerCase().includes(normalizedQuery) ||
+        preset.keywords.some((k) => k.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [normalizedQuery]);
+
   const grouped = useMemo(() => {
-    return SHAPE_CATEGORIES.map((cat) => {
+    /** @type {Array<{ id: string, label: string, kind: 'shape' | 'connector', items: any[] }>} */
+    const groups = SHAPE_CATEGORIES.map((cat) => {
       const items = SHAPE_DEFINITIONS.filter((def) => {
         if (def.category !== cat.id) return false;
         if (!normalizedQuery) return true;
@@ -75,9 +93,22 @@ export function ShapeLibrarySidebar({ open, onToggle }) {
           def.keywords.some((k) => k.toLowerCase().includes(normalizedQuery))
         );
       });
-      return { ...cat, items };
+      return { ...cat, kind: /** @type {const} */ ('shape'), items };
     }).filter((group) => group.items.length > 0);
-  }, [normalizedQuery]);
+
+    if (filteredConnectors.length > 0) {
+      const connectorGroup = {
+        id: 'connectors',
+        label: 'Garis & Penghubung',
+        kind: /** @type {const} */ ('connector'),
+        items: filteredConnectors,
+      };
+      const basicIdx = groups.findIndex((g) => g.id === 'basic');
+      groups.splice(basicIdx >= 0 ? basicIdx + 1 : 0, 0, connectorGroup);
+    }
+
+    return groups;
+  }, [normalizedQuery, filteredConnectors]);
 
   if (!open) {
     return (
@@ -105,6 +136,22 @@ export function ShapeLibrarySidebar({ open, onToggle }) {
     const cy = (window.innerHeight * 0.45 - camera.y) / camera.zoom;
     const jitter = (Math.random() - 0.5) * 32;
     const el = createElementFromShape(type, cx + jitter, cy + jitter, { renderMode });
+    addElement(el);
+    setActiveTool('select');
+  }
+
+  /**
+   * Insert a connector preset near center of current viewport when user clicks an item.
+   * @param {string} presetId
+   */
+  function handleQuickInsertConnector(presetId) {
+    const cx = (window.innerWidth * 0.45 - camera.x) / camera.zoom;
+    const cy = (window.innerHeight * 0.45 - camera.y) / camera.zoom;
+    const jitter = (Math.random() - 0.5) * 32;
+    const el = createConnectorFromPreset(presetId, cx + jitter, cy + jitter, {
+      renderMode,
+      strokeColor: defaultStrokeColor,
+    });
     addElement(el);
     setActiveTool('select');
   }
@@ -190,29 +237,49 @@ export function ShapeLibrarySidebar({ open, onToggle }) {
 
                 {isOpen && (
                   <div className="grid grid-cols-2 gap-1.5 p-2 bg-[#FFFFFF]">
-                    {group.items.map((shape) => (
-                      <button
-                        key={shape.type}
-                        type="button"
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('application/x-flowboard-shape', shape.type);
-                          e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                        onClick={() => handleQuickInsert(shape.type)}
-                        title={`${shape.label} — klik atau seret ke kanvas`}
-                        className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg border text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
-                          activeTool === shape.type
-                            ? 'border-[#1D4ED8] bg-[#DBEAFE]/40 text-[#1D4ED8]'
-                            : 'border-[#E2E8F0] bg-[#FFFFFF] text-[#0F172A] hover:bg-[#F1F5F9] hover:border-[#CBD5E1]'
-                        }`}
-                      >
-                        <ShapePreviewIcon preview={shape.preview} />
-                        <span className="text-[11px] leading-tight text-[#475569] line-clamp-2">
-                          {shape.label}
-                        </span>
-                      </button>
-                    ))}
+                    {group.kind === 'connector'
+                      ? group.items.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('application/x-flowboard-connector', preset.id);
+                              e.dataTransfer.effectAllowed = 'copy';
+                            }}
+                            onClick={() => handleQuickInsertConnector(preset.id)}
+                            title={`${preset.label} — klik atau seret ke kanvas`}
+                            className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] text-[#0F172A] hover:bg-[#F1F5F9] hover:border-[#CBD5E1] text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+                          >
+                            <ShapePreviewIcon preview={preset.preview} />
+                            <span className="text-[11px] leading-tight text-[#475569] line-clamp-2">
+                              {preset.label}
+                            </span>
+                          </button>
+                        ))
+                      : group.items.map((shape) => (
+                          <button
+                            key={shape.type}
+                            type="button"
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('application/x-flowboard-shape', shape.type);
+                              e.dataTransfer.effectAllowed = 'copy';
+                            }}
+                            onClick={() => handleQuickInsert(shape.type)}
+                            title={`${shape.label} — klik atau seret ke kanvas`}
+                            className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg border text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8] ${
+                              activeTool === shape.type
+                                ? 'border-[#1D4ED8] bg-[#DBEAFE]/40 text-[#1D4ED8]'
+                                : 'border-[#E2E8F0] bg-[#FFFFFF] text-[#0F172A] hover:bg-[#F1F5F9] hover:border-[#CBD5E1]'
+                            }`}
+                          >
+                            <ShapePreviewIcon preview={shape.preview} />
+                            <span className="text-[11px] leading-tight text-[#475569] line-clamp-2">
+                              {shape.label}
+                            </span>
+                          </button>
+                        ))}
                   </div>
                 )}
               </section>
