@@ -6,7 +6,9 @@ import { renderCanvasScene } from '../engine/canvasRenderer.js';
 import {
   applyResizeRotated,
   computeAlignmentGuides,
+  findConnectorLabelAtPoint,
   findTopmostElementAtPoint,
+  getConnectorLabelRect,
   getElementBounds,
   getResizeHandles,
   hitTestResizeHandle,
@@ -56,6 +58,8 @@ export function WhiteboardCanvas() {
     ),
   );
   const [showPortsForId, setShowPortsForId] = useState(/** @type {string | null} */ (null));
+  const [hoveredLabelId, setHoveredLabelId] = useState(/** @type {string | null} */ (null));
+  const [draggingLabelId, setDraggingLabelId] = useState(/** @type {string | null} */ (null));
   const [cursorStyle, setCursorStyle] = useState('default');
   const [contextMenu, setContextMenu] = useState(
     /** @type {{ x: number, y: number, currentType: string, selectedCount: number } | null} */ (
@@ -82,10 +86,24 @@ export function WhiteboardCanvas() {
       selectedIds,
       hoveredPort,
       showPortsForId,
+      hoveredLabelId,
+      draggingLabelId,
       guides,
       marquee,
     });
-  }, [elements, camera, settings, theme, selectedIds, hoveredPort, showPortsForId, guides, marquee]);
+  }, [
+    elements,
+    camera,
+    settings,
+    theme,
+    selectedIds,
+    hoveredPort,
+    showPortsForId,
+    hoveredLabelId,
+    draggingLabelId,
+    guides,
+    marquee,
+  ]);
 
   // Resize observer so canvas adapts cleanly when sidebars toggle or window resizes
   useEffect(() => {
@@ -501,6 +519,29 @@ export function WhiteboardCanvas() {
             return;
           }
 
+          // Hit-test the selected connector's label pill before bend/midpoint handles so labels sitting on the wire are always easy to drag
+          const selLabelRect = getConnectorLabelRect(sel, elementsById);
+          const labelPad = 6 / store.camera.zoom;
+          if (
+            selLabelRect &&
+            world.x >= selLabelRect.x - labelPad &&
+            world.x <= selLabelRect.x + selLabelRect.width + labelPad &&
+            world.y >= selLabelRect.y - labelPad &&
+            world.y <= selLabelRect.y + selLabelRect.height + labelPad
+          ) {
+            interactionRef.current = {
+              mode: 'drag-connector-label',
+              id: sel.id,
+              startWorld: world,
+              initialLabelPos: { x: selLabelRect.cx, y: selLabelRect.cy },
+              moved: false,
+              historyCommitted: false,
+            };
+            setDraggingLabelId(sel.id);
+            setCursorStyle('grabbing');
+            return;
+          }
+
           // Hit-test existing corner/bend handles
           for (const ch of routed.cornerHandles) {
             if (Math.hypot(world.x - ch.x, world.y - ch.y) <= r) {
@@ -571,6 +612,31 @@ export function WhiteboardCanvas() {
             return;
           }
         }
+      }
+    }
+
+    // Direct 1-click drag on any unlocked connector's text label (even if the connector is not selected yet)
+    if (!isMultiSelectMod) {
+      const labelHit = findConnectorLabelAtPoint(
+        world,
+        store.elements,
+        elementsById,
+        6 / store.camera.zoom,
+      );
+      if (labelHit && !labelHit.locked) {
+        const routed = computeConnectorPath(labelHit, elementsById);
+        store.setSelectedIds([labelHit.id]);
+        interactionRef.current = {
+          mode: 'drag-connector-label',
+          id: labelHit.id,
+          startWorld: world,
+          initialLabelPos: { ...routed.labelPosition },
+          moved: false,
+          historyCommitted: false,
+        };
+        setDraggingLabelId(labelHit.id);
+        setCursorStyle('grabbing');
+        return;
       }
     }
 
@@ -681,6 +747,7 @@ export function WhiteboardCanvas() {
           setCursorStyle('grab');
         } else if (store.activeTool === 'select') {
           let nextCursor = 'default';
+          let nextHoveredLabelId = /** @type {string | null} */ (null);
           if (store.selectedIds.length === 1) {
             const sel = store.elements.find((el) => el.id === store.selectedIds[0]);
             if (sel && !sel.locked && sel.type !== 'connector' && sel.type !== 'freehand') {
@@ -697,8 +764,25 @@ export function WhiteboardCanvas() {
               }
             }
           }
+          if (nextCursor === 'default') {
+            const map = new Map(store.elements.map((el) => [el.id, el]));
+            const labelHover = findConnectorLabelAtPoint(
+              world,
+              store.elements,
+              map,
+              6 / store.camera.zoom,
+            );
+            if (labelHover && !labelHover.locked) {
+              nextHoveredLabelId = labelHover.id;
+              nextCursor = 'move';
+            }
+          }
+          if (hoveredLabelId !== nextHoveredLabelId) {
+            setHoveredLabelId(nextHoveredLabelId);
+          }
           setCursorStyle(nextCursor);
         } else {
+          if (hoveredLabelId) setHoveredLabelId(null);
           setCursorStyle('crosshair');
         }
       }
@@ -779,6 +863,38 @@ export function WhiteboardCanvas() {
                   : null,
               }
             : el,
+        ),
+      );
+      return;
+    }
+
+    if (interaction.mode === 'drag-connector-label') {
+      const dx = world.x - interaction.startWorld.x;
+      const dy = world.y - interaction.startWorld.y;
+      const deadzone = 2 / store.camera.zoom;
+      if (!interaction.moved && Math.hypot(dx, dy) < deadzone) {
+        return;
+      }
+      if (!interaction.historyCommitted) {
+        store.commitSnapshot();
+        interaction.historyCommitted = true;
+      }
+      interaction.moved = true;
+
+      let nextX = interaction.initialLabelPos.x + dx;
+      let nextY = interaction.initialLabelPos.y + dy;
+      // Smooth free positioning by default; hold Shift to gently snap to 10px steps
+      if (e.shiftKey) {
+        nextX = snapValue(nextX, 10, true);
+        nextY = snapValue(nextY, 10, true);
+      } else {
+        nextX = Math.round(nextX);
+        nextY = Math.round(nextY);
+      }
+
+      store.setElementsLive((els) =>
+        els.map((el) =>
+          el.id === interaction.id ? { ...el, labelPos: { x: nextX, y: nextY } } : el,
         ),
       );
       return;
@@ -1036,8 +1152,17 @@ export function WhiteboardCanvas() {
     setMarquee(null);
     setHoveredPort(null);
     setShowPortsForId(null);
+    setDraggingLabelId(null);
 
     if (!interaction) return;
+
+    if (interaction.mode === 'drag-connector-label') {
+      setCursorStyle(store.activeTool === 'select' ? 'move' : 'default');
+      if (interaction.moved) {
+        store.scheduleAutosave();
+      }
+      return;
+    }
 
     if (interaction.mode === 'pan') {
       setCursorStyle(store.activeTool === 'hand' ? 'grab' : 'default');

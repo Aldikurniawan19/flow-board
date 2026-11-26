@@ -21,6 +21,7 @@ describe('FlowBoard UI integration', () => {
       saveStatus: 'saved',
       feedback: null,
       elements: [],
+      activeTool: 'select',
       selectedIds: [],
       editingId: null,
       past: [],
@@ -887,5 +888,103 @@ p "1" -- "N" t : "MELAKUKAN"
       expect(await screen.findByRole('img', { name: item.expectedLabel })).toBeInTheDocument();
       view.unmount();
     }
+  });
+
+  it('allows dragging a generated connector label freely anywhere on canvas and resetting its position', async () => {
+    vi.spyOn(apiClient, 'getMe').mockResolvedValue({
+      user: { id: 'u1', name: 'Rina', email: 'rina@example.com' },
+    });
+    vi.spyOn(apiClient, 'listBoards').mockResolvedValue({
+      boards: [{ id: 'b1', title: 'DFD KRS', createdAt: '', updatedAt: '' }],
+    });
+    vi.spyOn(apiClient, 'getBoard').mockResolvedValue({
+      board: {
+        id: 'b1',
+        title: 'DFD KRS',
+        settings: { renderMode: 'clean', gridMode: 'dots', snapToGrid: true },
+        elements: [
+          {
+            id: 'c-flow-1',
+            type: 'connector',
+            x: 100,
+            y: 120,
+            width: 240,
+            height: 0,
+            strokeColor: '#0F172A',
+            fillColor: 'transparent',
+            strokeWidth: 2,
+            strokeStyle: 'solid',
+            roughness: 0,
+            opacity: 1,
+            seed: 7,
+            text: 'Pilihan mata kuliah',
+            routing: 'straight',
+            startMarker: 'none',
+            endMarker: 'filled_arrow',
+            labelPos: { x: 220, y: 120 },
+          },
+        ],
+      },
+    });
+    vi.spyOn(apiClient, 'updateBoard').mockResolvedValue({
+      board: { id: 'b1', title: 'DFD KRS', updatedAt: '' },
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    const canvas = await screen.findByLabelText('Kanvas papan tulis FlowBoard');
+    canvas.setPointerCapture = vi.fn();
+    canvas.releasePointerCapture = vi.fn();
+    canvas.hasPointerCapture = vi.fn(() => false);
+
+    await waitFor(() => {
+      expect(useBoardStore.getState().elements).toHaveLength(1);
+    });
+
+    act(() => {
+      useBoardStore.getState().setCamera({ x: 0, y: 0, zoom: 1 });
+      useBoardStore.getState().setSelectedIds([]);
+    });
+
+    // Grab the connector label directly at (220, 120) without selecting the connector first, then drag to (295, 210)
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 220,
+          clientY: 120,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 295,
+          clientY: 210,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointerup', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 295,
+          clientY: 210,
+          button: 0,
+        }),
+      );
+    });
+
+    const movedConn = useBoardStore.getState().elements.find((el) => el.id === 'c-flow-1');
+    expect(useBoardStore.getState().selectedIds).toEqual(['c-flow-1']);
+    expect(movedConn?.labelPos).toEqual({ x: 295, y: 210 });
+
+    // Clicking "Reset Posisi" in InspectorPanel restores automatic wire midpoint placement
+    await user.click(screen.getByRole('button', { name: 'Reset Posisi' }));
+    const resetConn = useBoardStore.getState().elements.find((el) => el.id === 'c-flow-1');
+    expect(resetConn?.labelPos).toBeNull();
   });
 });

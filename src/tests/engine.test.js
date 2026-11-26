@@ -4,10 +4,13 @@ import {
   applyResize,
   applyResizeRotated,
   computeAlignmentGuides,
+  findConnectorLabelAtPoint,
+  getConnectorLabelRect,
   getElementBounds,
   getRotationHandle,
   hitTestElement,
   hitTestRotationHandle,
+  nearestPointOnPolyline,
   rectsIntersect,
 } from '../engine/geometry.js';
 import {
@@ -548,5 +551,58 @@ describe('360-degree symbol rotation', () => {
     expect(svg).toContain('</svg>');
     expect(svg).toContain('Konflik');
     expect(svg).toContain('App Server');
+  });
+});
+
+describe('Flexible connector label geometry & hit-testing', () => {
+  it('computes label rect, hits dragged labels away from the wire, and expands connector bounds for export', () => {
+    /** @type {import('../types/schema.js').BoardElement} */
+    const conn = {
+      id: 'conn-label-1',
+      type: 'connector',
+      x: 100,
+      y: 100,
+      width: 240,
+      height: 0,
+      strokeColor: '#0F172A',
+      fillColor: 'transparent',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness: 0,
+      opacity: 1,
+      seed: 1,
+      text: 'Pilihan mata kuliah',
+      routing: 'straight',
+      startMarker: 'none',
+      endMarker: 'filled_arrow',
+      labelPos: { x: 220, y: 240 },
+    };
+    const map = new Map([[conn.id, conn]]);
+
+    const rect = getConnectorLabelRect(conn, map);
+    expect(rect).not.toBeNull();
+    expect(rect?.cx).toBe(220);
+    expect(rect?.cy).toBe(240);
+
+    // Hit-testing on the dragged label far below the wire (y=240 vs wire y=100) finds the connector
+    expect(findConnectorLabelAtPoint({ x: 220, y: 240 }, [conn], map)?.id).toBe(conn.id);
+    expect(hitTestElement({ x: 220, y: 240 }, conn, map)).toBe(true);
+    expect(findConnectorLabelAtPoint({ x: 220, y: 100 }, [conn], map)).toBeNull();
+
+    // Connector bounding box expands to enclose the moved label so exports never clip it
+    const bounds = getElementBounds(conn, map);
+    expect(bounds.y + bounds.height).toBeGreaterThanOrEqual(248);
+
+    // Nearest point on wire from moved label points straight up to (220, 100)
+    const nearest = nearestPointOnPolyline(
+      { x: 220, y: 240 },
+      [
+        { x: 100, y: 100 },
+        { x: 340, y: 100 },
+      ],
+    );
+    expect(nearest.x).toBe(220);
+    expect(nearest.y).toBe(100);
+    expect(nearest.distance).toBe(140);
   });
 });

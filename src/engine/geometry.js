@@ -7,6 +7,132 @@ import { computeConnectorPath } from './router.js';
  */
 
 /**
+ * Estimate wrapped line count and widest line width for a connector label without requiring a Canvas 2D context.
+ * Matches `drawConnectorLabel` parameters (maxWidth=158, padX=6, padY=3, lineHeight=1.28).
+ * @param {string} rawText
+ * @param {number} fontSize
+ * @returns {{ width: number, height: number }}
+ */
+function estimateConnectorLabelSize(rawText, fontSize) {
+  const maxWidth = 158;
+  const charW = fontSize * 0.58;
+  const maxCharsPerLine = Math.max(8, Math.floor(maxWidth / charW));
+  const paragraphs = rawText.trim().split('\n');
+  /** @type {string[]} */
+  const lines = [];
+
+  for (const para of paragraphs) {
+    const words = para.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      lines.push('');
+      continue;
+    }
+    let current = words[0];
+    for (let i = 1; i < words.length; i += 1) {
+      const next = `${current} ${words[i]}`;
+      if (next.length > maxCharsPerLine) {
+        lines.push(current);
+        current = words[i];
+      } else {
+        current = next;
+      }
+    }
+    lines.push(current);
+  }
+
+  const maxLineChars = lines.reduce((m, l) => Math.max(m, l.length), 1);
+  const textW = Math.min(maxWidth, maxLineChars * charW);
+  const lineH = fontSize * 1.28;
+  return {
+    width: Math.max(28, textW + 12),
+    height: Math.max(20, lines.length * lineH + 6),
+  };
+}
+
+/**
+ * Compute world-space bounding box of a connector's text label pill (or null if no label text).
+ * @param {import('../types/schema.js').BoardElement} el
+ * @param {Map<string, import('../types/schema.js').BoardElement>} [elementsById]
+ * @returns {{ x: number, y: number, width: number, height: number, cx: number, cy: number } | null}
+ */
+export function getConnectorLabelRect(el, elementsById = new Map()) {
+  if (el.type !== 'connector' || !el.text || !el.text.trim()) return null;
+  const routed = computeConnectorPath(el, elementsById);
+  if (routed.points.length < 2) return null;
+  const fontSize = Math.min(el.fontSize || 11, 11.5);
+  const { width, height } = estimateConnectorLabelSize(el.text, fontSize);
+  const cx = routed.labelPosition.x;
+  const cy = routed.labelPosition.y;
+  return {
+    x: cx - width / 2,
+    y: cy - height / 2,
+    width,
+    height,
+    cx,
+    cy,
+  };
+}
+
+/**
+ * Find the topmost connector whose text label pill contains `point`.
+ * @param {{ x: number, y: number }} point
+ * @param {import('../types/schema.js').BoardElement[]} elements
+ * @param {Map<string, import('../types/schema.js').BoardElement>} elementsById
+ * @param {number} [padding]
+ * @returns {import('../types/schema.js').BoardElement | null}
+ */
+export function findConnectorLabelAtPoint(point, elements, elementsById, padding = 4) {
+  for (let i = elements.length - 1; i >= 0; i -= 1) {
+    const el = elements[i];
+    if (el.type !== 'connector' || !el.text || !el.text.trim()) continue;
+    const rect = getConnectorLabelRect(el, elementsById);
+    if (!rect) continue;
+    if (
+      point.x >= rect.x - padding &&
+      point.x <= rect.x + rect.width + padding &&
+      point.y >= rect.y - padding &&
+      point.y <= rect.y + rect.height + padding
+    ) {
+      return el;
+    }
+  }
+  return null;
+}
+
+/**
+ * Find the closest point along a polyline to a reference point (used for label tether guides).
+ * @param {{ x: number, y: number }} point
+ * @param {Array<{ x: number, y: number }>} pts
+ * @returns {{ x: number, y: number, distance: number }}
+ */
+export function nearestPointOnPolyline(point, pts) {
+  if (pts.length === 0) return { x: point.x, y: point.y, distance: 0 };
+  if (pts.length === 1) {
+    return { x: pts[0].x, y: pts[0].y, distance: Math.hypot(point.x - pts[0].x, point.y - pts[0].y) };
+  }
+  let bestX = pts[0].x;
+  let bestY = pts[0].y;
+  let bestDist = Infinity;
+  for (let i = 0; i < pts.length - 1; i += 1) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+    const px = a.x + t * dx;
+    const py = a.y + t * dy;
+    const dist = Math.hypot(point.x - px, point.y - py);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestX = px;
+      bestY = py;
+    }
+  }
+  return { x: bestX, y: bestY, distance: bestDist };
+}
+
+/**
  * Compute bounding rectangle for any element (shape, freehand, or connector).
  * @param {import('../types/schema.js').BoardElement} el
  * @param {Map<string, import('../types/schema.js').BoardElement>} [elementsById]
@@ -45,6 +171,13 @@ export function getElementBounds(el, elementsById = new Map()) {
       if (p.y < minY) minY = p.y;
       if (p.x > maxX) maxX = p.x;
       if (p.y > maxY) maxY = p.y;
+    }
+    const labelRect = getConnectorLabelRect(el, elementsById);
+    if (labelRect) {
+      if (labelRect.x < minX) minX = labelRect.x;
+      if (labelRect.y < minY) minY = labelRect.y;
+      if (labelRect.x + labelRect.width > maxX) maxX = labelRect.x + labelRect.width;
+      if (labelRect.y + labelRect.height > maxY) maxY = labelRect.y + labelRect.height;
     }
     return {
       x: minX,
@@ -111,6 +244,16 @@ export function pointToSegmentDistance(p, a, b) {
  */
 export function hitTestElement(point, el, elementsById, tolerance = 8) {
   if (el.type === 'connector') {
+    const labelRect = getConnectorLabelRect(el, elementsById);
+    if (
+      labelRect &&
+      point.x >= labelRect.x - 4 &&
+      point.x <= labelRect.x + labelRect.width + 4 &&
+      point.y >= labelRect.y - 4 &&
+      point.y <= labelRect.y + labelRect.height + 4
+    ) {
+      return true;
+    }
     const path = computeConnectorPath(el, elementsById);
     for (let i = 0; i < path.points.length - 1; i += 1) {
       if (pointToSegmentDistance(point, path.points[i], path.points[i + 1]) <= tolerance) {

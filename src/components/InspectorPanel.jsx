@@ -852,9 +852,22 @@ export function InspectorPanel({ open, onToggle }) {
                 )}
 
                 <div>
-                  <label htmlFor="prop-text" className="block text-[#475569] mb-1">
-                    {isErdTable ? 'Nama Tabel / Entitas' : isConnectorOnly ? 'Label Aliran / Relasi' : 'Label Teks'}
-                  </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label htmlFor="prop-text" className="block text-[#475569]">
+                      {isErdTable ? 'Nama Tabel / Entitas' : isConnectorOnly ? 'Label Aliran / Relasi' : 'Label Teks'}
+                    </label>
+                    {isConnectorOnly && primary.text?.trim() && primary.labelPos && (
+                      <button
+                        type="button"
+                        onClick={() => updateElementById(primary.id, { labelPos: null })}
+                        title="Kembalikan posisi label ke titik tengah otomatis garis"
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[#1D4ED8] hover:underline"
+                      >
+                        <RotateCcw className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                        Reset Posisi
+                      </button>
+                    )}
+                  </div>
                   <textarea
                     id="prop-text"
                     rows={isConnectorOnly || isErdTable ? 1 : 2}
@@ -862,6 +875,11 @@ export function InspectorPanel({ open, onToggle }) {
                     onChange={(e) => updateElementById(primary.id, { text: e.target.value })}
                     className="w-full rounded-lg border border-[#E2E8F0] px-2.5 py-1.5 text-xs text-[#0F172A] resize-y"
                   />
+                  {isConnectorOnly && primary.text?.trim() && (
+                    <p className="mt-1 text-[11px] text-[#64748B]">
+                      Seret langsung teks label di kanvas untuk memindahkannya secara bebas ke mana saja.
+                    </p>
+                  )}
                 </div>
               </section>
             )}

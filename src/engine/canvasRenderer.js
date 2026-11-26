@@ -1,7 +1,13 @@
 import rough from 'roughjs';
 import getStroke from 'perfect-freehand';
 import { FONT_FAMILY_MAP, GRID_SIZE, UI_TOKENS } from '../constants/tokens.js';
-import { getElementBounds, getResizeHandles, getRotationHandle } from './geometry.js';
+import {
+  getConnectorLabelRect,
+  getElementBounds,
+  getResizeHandles,
+  getRotationHandle,
+  nearestPointOnPolyline,
+} from './geometry.js';
 import { drawCanvasMarker } from './markers.js';
 import { getNormalizedRect, getShapePorts, isConnectableElement } from './ports.js';
 import { computeConnectorJumpPointsMap, computeConnectorPath } from './router.js';
@@ -367,6 +373,8 @@ export function drawConnectorElement(
  *   selectedIds: string[],
  *   hoveredPort: { elementId: string, side: import('../types/schema.js').PortSide, point: { x: number, y: number } } | null,
  *   showPortsForId: string | null,
+ *   hoveredLabelId?: string | null,
+ *   draggingLabelId?: string | null,
  *   guides: Array<{ axis: 'x' | 'y', pos: number, from: number, to: number }>,
  *   marquee: { x: number, y: number, width: number, height: number } | null
  * }} state
@@ -532,6 +540,54 @@ export function renderCanvasScene(canvas, state) {
         ctx.fill();
         ctx.stroke();
       });
+
+      // Highlight draggable label pill + subtle tether line when moved away from wire
+      if (el.text && el.text.trim()) {
+        const labelRect = getConnectorLabelRect(el, elementsById);
+        if (labelRect) {
+          const nearest = nearestPointOnPolyline(
+            { x: labelRect.cx, y: labelRect.cy },
+            routed.points,
+          );
+          if (nearest.distance > 16) {
+            ctx.save();
+            ctx.strokeStyle = uiAccent;
+            ctx.globalAlpha = 0.55;
+            ctx.lineWidth = 1.1 / state.camera.zoom;
+            ctx.setLineDash([4 / state.camera.zoom, 3 / state.camera.zoom]);
+            ctx.beginPath();
+            ctx.moveTo(nearest.x, nearest.y);
+            ctx.lineTo(labelRect.cx, labelRect.cy);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          ctx.save();
+          ctx.strokeStyle = uiAccent;
+          ctx.globalAlpha = state.draggingLabelId === el.id ? 0.95 : 0.72;
+          ctx.lineWidth = 1.25 / state.camera.zoom;
+          ctx.setLineDash([4 / state.camera.zoom, 3 / state.camera.zoom]);
+          const pad = 2 / state.camera.zoom;
+          ctx.beginPath();
+          ctx.roundRect?.(
+            labelRect.x - pad,
+            labelRect.y - pad,
+            labelRect.width + pad * 2,
+            labelRect.height + pad * 2,
+            4 / state.camera.zoom,
+          );
+          if (!ctx.roundRect) {
+            ctx.rect(
+              labelRect.x - pad,
+              labelRect.y - pad,
+              labelRect.width + pad * 2,
+              labelRect.height + pad * 2,
+            );
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
     } else if (el.type === 'freehand') {
       const b = getElementBounds(el, elementsById);
       const pad = 4 / state.camera.zoom;
@@ -634,6 +690,40 @@ export function renderCanvasScene(canvas, state) {
       }
     }
     ctx.restore();
+  }
+
+  // Hover highlight for unselected connector labels so users immediately see they can drag them
+  if (state.hoveredLabelId && !selectedSet.has(state.hoveredLabelId)) {
+    const hoveredConn = elementsById.get(state.hoveredLabelId);
+    if (hoveredConn && hoveredConn.type === 'connector' && !hoveredConn.locked) {
+      const labelRect = getConnectorLabelRect(hoveredConn, elementsById);
+      if (labelRect) {
+        ctx.save();
+        ctx.strokeStyle = uiAccent;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 1.25 / state.camera.zoom;
+        ctx.setLineDash([4 / state.camera.zoom, 3 / state.camera.zoom]);
+        const pad = 2 / state.camera.zoom;
+        ctx.beginPath();
+        ctx.roundRect?.(
+          labelRect.x - pad,
+          labelRect.y - pad,
+          labelRect.width + pad * 2,
+          labelRect.height + pad * 2,
+          4 / state.camera.zoom,
+        );
+        if (!ctx.roundRect) {
+          ctx.rect(
+            labelRect.x - pad,
+            labelRect.y - pad,
+            labelRect.width + pad * 2,
+            labelRect.height + pad * 2,
+          );
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
   }
 
   // Flexible anchor guide & live sliding snap point when hovering/connecting
