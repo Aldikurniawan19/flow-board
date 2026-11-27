@@ -1381,5 +1381,31 @@ p "1" -- "N" t : "MELAKUKAN"
       useBoardStore.getState().setActiveTool('eraser');
     });
     expect(canvas.style.cursor).toContain('data:image/svg+xml');
+
+    // 10. Custom Tipe Jalur dropdown matches MarkerPicker listbox UX and updates defaultRouting
+    act(() => {
+      useBoardStore.getState().setSelectedIds([]);
+    });
+    const routingTrigger = screen.getByRole('button', { name: /Tipe Jalur/i });
+    await user.click(routingTrigger);
+    await user.click(screen.getByRole('option', { name: 'Kurva Halus' }));
+    expect(useBoardStore.getState().defaultRouting).toBe('curved');
+
+    // 11. Keyboard shortcut 'L' cycles Tipe Jalur (curved -> elbow -> straight) for both default and selected connector
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true }));
+    });
+    expect(useBoardStore.getState().defaultRouting).toBe('elbow');
+
+    act(() => {
+      useBoardStore.getState().setSelectedIds([connOne.id]);
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true }));
+    });
+    expect(useBoardStore.getState().defaultRouting).toBe('straight');
+    expect(useBoardStore.getState().elements.find((el) => el.id === connOne.id)?.routing).toBe(
+      'straight',
+    );
   });
 });

@@ -380,7 +380,37 @@ export function WhiteboardCanvas() {
       }
 
       if (!mod && !e.altKey) {
-        const mapped = TOOL_SHORTCUTS[e.key.toLowerCase()];
+        const lowerKey = e.key.toLowerCase();
+        if (lowerKey === 'l' && !e.repeat) {
+          e.preventDefault();
+          /** @type {Array<{ value: import('../types/schema.js').RoutingMode, label: string }>} */
+          const routingOrder = [
+            { value: 'elbow', label: 'Siku 90° (Orthogonal)' },
+            { value: 'straight', label: 'Garis Lurus' },
+            { value: 'curved', label: 'Kurva Halus' },
+          ];
+          const selectedSet = new Set(store.selectedIds);
+          const selectedConnectors = store.elements.filter(
+            (el) => selectedSet.has(el.id) && el.type === 'connector' && !el.locked,
+          );
+          const currentRouting =
+            selectedConnectors.length > 0
+              ? selectedConnectors[0].routing || store.defaultRouting
+              : store.defaultRouting;
+          const currIdx = routingOrder.findIndex((item) => item.value === currentRouting);
+          const nextItem = routingOrder[(currIdx + 1) % routingOrder.length];
+
+          store.setDefaultStyle({ defaultRouting: nextItem.value });
+          if (selectedConnectors.length > 0) {
+            store.updateSelectedElements(
+              (el) => (el.type === 'connector' && !el.locked ? { routing: nextItem.value } : null),
+              { syncSameType: false },
+            );
+          }
+          store.setFeedback({ type: 'info', message: `Tipe jalur: ${nextItem.label}` });
+          return;
+        }
+        const mapped = TOOL_SHORTCUTS[lowerKey];
         if (mapped) {
           store.setActiveTool(mapped);
         }

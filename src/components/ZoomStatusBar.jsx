@@ -142,6 +142,10 @@ export function ZoomStatusBar() {
                 <dd className="font-mono-tabular text-[#0F172A]">C / T</dd>
               </div>
               <div className="flex justify-between">
+                <dt>Ganti Tipe Jalur</dt>
+                <dd className="font-mono-tabular text-[#0F172A]">L</dd>
+              </div>
+              <div className="flex justify-between">
                 <dt>Edit Teks Elemen</dt>
                 <dd className="font-mono-tabular text-[#0F172A]">Klik 2x</dd>
               </div>

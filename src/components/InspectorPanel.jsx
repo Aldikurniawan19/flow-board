@@ -28,7 +28,7 @@ import {
 } from '../constants/tokens.js';
 import { getNormalizedRect, normalizeRotation } from '../engine/ports.js';
 import { useBoardStore } from '../store/useBoardStore.js';
-import { MarkerPicker } from './MarkerPicker.jsx';
+import { MarkerPicker, RoutingPicker } from './MarkerPicker.jsx';
 
 const MIN_ELEMENT_SIZE = 24;
 const MAX_ELEMENT_SIZE = 4000;
@@ -366,21 +366,13 @@ export function InspectorPanel({ open, onToggle }) {
 
             <section className="space-y-2 pt-3 border-t border-[#E2E8F0]">
               <h3 className="font-semibold text-[#0F172A]">Default Konektor</h3>
-              <div>
-                <label htmlFor="default-routing" className="block text-[#475569] mb-1">
-                  Tipe Jalur
-                </label>
-                <select
-                  id="default-routing"
-                  value={defaultRouting}
-                  onChange={(e) => setDefaultStyle({ defaultRouting: e.target.value })}
-                  className="w-full rounded-lg border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs text-[#0F172A]"
-                >
-                  <option value="elbow">Siku 90° (Orthogonal)</option>
-                  <option value="straight">Garis Lurus</option>
-                  <option value="curved">Kurva Halus</option>
-                </select>
-              </div>
+              <RoutingPicker
+                id="default-routing"
+                label="Tipe Jalur"
+                shortcut="L"
+                value={defaultRouting}
+                onChange={(val) => setDefaultStyle({ defaultRouting: val })}
+              />
               <MarkerPicker
                 id="default-end-marker"
                 label="Ujung Akhir Default"
