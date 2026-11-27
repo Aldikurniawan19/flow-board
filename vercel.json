@@ -21,7 +21,7 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/((?!api/|\\.well-known/).*)",
+      "source": "/((?!api/|\\.well-known/|assets/|favicon\\.svg|llms\\.txt|robots\\.txt|sitemap\\.xml).*)",
       "destination": "/index.html"
     }
   ]

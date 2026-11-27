@@ -7,6 +7,15 @@
   &nbsp;FlowBoard
 </h1>
 
+<p>
+  <a href="https://flow-board-dun.vercel.app/"><img src="https://img.shields.io/badge/Live%20Demo-flow--board--dun.vercel.app-1D4ED8?style=flat-square&logo=vercel&logoColor=white" alt="Live Demo" /></a>
+  <a href="https://github.com/Aldikurniawan19/flow-board/actions/workflows/ci.yml"><img src="https://github.com/Aldikurniawan19/flow-board/actions/workflows/ci.yml/badge.svg" alt="CI Status" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-0F172A?style=flat-square" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&logo=react&logoColor=white" alt="React 19" />
+  <img src="https://img.shields.io/badge/Express-5-000000?style=flat-square&logo=express&logoColor=white" alt="Express 5" />
+  <img src="https://img.shields.io/badge/MCP-OAuth%202.1%20%2B%20PKCE-2563EB?style=flat-square" alt="MCP & OAuth 2.1" />
+</p>
+
 **Platform perancangan diagram teknis dan papan tulis vektor interaktif berbasis HTML5 Canvas, dengan mesin routing ortogonal anti-halangan, kompilator PlantText/PlantUML, serta integrasi Model Context Protocol (MCP) dan OAuth 2.1.**
 
 </div>
@@ -152,3 +161,9 @@ npm run build       # Kompilasi bundle produksi Vite ke dist/
     ├── types/       # Definisi tipe JSDoc dan skema validasi Zod
     └── tests/       # Suite pengujian engine, auto-layout, API & keamanan, serta integrasi UI
 ```
+
+---
+
+## Lisensi
+
+Proyek ini didistribusikan di bawah lisensi **MIT**. Lihat berkas [LICENSE](LICENSE) untuk detail selengkapnya.
