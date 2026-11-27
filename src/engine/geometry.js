@@ -241,6 +241,35 @@ export function pointToSegmentDistance(p, a, b) {
 }
 
 /**
+ * Find the closest orthogonal (horizontal or vertical) segment of a connector polyline at `worldPoint`.
+ * @param {{ x: number, y: number }} worldPoint
+ * @param {Array<{ x: number, y: number }>} controlVertices
+ * @param {number} [tolerance]
+ * @returns {{ segmentIndex: number, orientation: 'horizontal' | 'vertical' } | null}
+ */
+export function findOrthoSegmentAtPoint(worldPoint, controlVertices, tolerance = 8) {
+  let best = /** @type {{ segmentIndex: number, orientation: 'horizontal' | 'vertical', dist: number } | null} */ (null);
+  for (let i = 0; i < controlVertices.length - 1; i += 1) {
+    const a = controlVertices[i];
+    const b = controlVertices[i + 1];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 10) continue;
+    /** @type {'horizontal' | 'vertical' | null} */
+    const orientation =
+      Math.abs(a.x - b.x) < 1
+        ? 'vertical'
+        : Math.abs(a.y - b.y) < 1
+          ? 'horizontal'
+          : null;
+    if (!orientation) continue;
+    const dist = pointToSegmentDistance(worldPoint, a, b);
+    if (dist <= tolerance && (!best || dist < best.dist)) {
+      best = { segmentIndex: i, orientation, dist };
+    }
+  }
+  return best ? { segmentIndex: best.segmentIndex, orientation: best.orientation } : null;
+}
+
+/**
  * Test if a world point intersects an element.
  * @param {{ x: number, y: number }} point
  * @param {import('../types/schema.js').BoardElement} el

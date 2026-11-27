@@ -7,6 +7,7 @@ import {
   applyResizeRotated,
   computeAlignmentGuides,
   findConnectorLabelAtPoint,
+  findOrthoSegmentAtPoint,
   findTopmostElementAtPoint,
   getConnectorLabelRect,
   getElementBounds,
@@ -443,6 +444,57 @@ export function WhiteboardCanvas() {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
+  /**
+   * Prepare an orthogonal segment slide interaction for an elbow connector so dragging
+   * anywhere along the segment (or its midpoint handle) slides it perpendicularly without
+   * detaching bound start/end anchors.
+   * @param {import('../types/schema.js').BoardElement} conn
+   * @param {number} segIdx
+   * @param {'horizontal' | 'vertical'} orientation
+   * @param {ReturnType<typeof computeConnectorPath>} routed
+   * @param {{ x: number, y: number }} startWorld
+   */
+  function beginOrthoSegmentSlide(conn, segIdx, orientation, routed, startWorld) {
+    const baseWaypoints =
+      conn.waypoints && conn.waypoints.length > 0
+        ? conn.waypoints.map((p) => ({ ...p }))
+        : routed.cornerHandles.map((c) => ({ x: c.x, y: c.y }));
+    const verts = routed.controlVertices;
+    const startsAtAnchor = segIdx === 0;
+    const endsAtAnchor = segIdx + 1 === verts.length - 1;
+    const preparedWaypoints = [...baseWaypoints];
+
+    let wpIdxA = segIdx - 1;
+    let wpIdxB = segIdx;
+
+    if (startsAtAnchor && endsAtAnchor) {
+      preparedWaypoints.splice(0, 0, { ...verts[0] }, { ...verts[1] });
+      wpIdxA = 0;
+      wpIdxB = 1;
+    } else if (startsAtAnchor) {
+      preparedWaypoints.splice(0, 0, { ...verts[0] });
+      wpIdxA = 0;
+      wpIdxB = 1;
+    } else if (endsAtAnchor) {
+      preparedWaypoints.push({ ...verts[verts.length - 1] });
+      wpIdxA = segIdx - 1;
+      wpIdxB = preparedWaypoints.length - 1;
+    }
+
+    interactionRef.current = {
+      mode: 'drag-connector-segment',
+      id: conn.id,
+      axis: orientation === 'vertical' ? 'x' : 'y',
+      wpIdxA,
+      wpIdxB,
+      preparedWaypoints,
+      startWorld,
+      moved: false,
+      historyCommitted: false,
+    };
+    setCursorStyle(orientation === 'vertical' ? 'ew-resize' : 'ns-resize');
+  }
+
   /** @param {import('react').PointerEvent<HTMLCanvasElement>} e */
   function handlePointerDown(e) {
     // Let onContextMenu handle right-click without altering selection or starting drag
@@ -677,58 +729,16 @@ export function WhiteboardCanvas() {
           // smoothly left/right or up/down while keeping both bound endpoints firmly attached.
           for (const mh of routed.midpointHandles) {
             if (Math.hypot(world.x - mh.x, world.y - mh.y) <= r) {
+              if ((sel.routing || 'elbow') === 'elbow' && mh.orientation !== 'diagonal' && !e.altKey) {
+                beginOrthoSegmentSlide(sel, mh.segmentIndex, mh.orientation, routed, world);
+                return;
+              }
+
               store.commitSnapshot();
               const baseWaypoints =
                 sel.waypoints && sel.waypoints.length > 0
                   ? sel.waypoints.map((p) => ({ ...p }))
                   : routed.cornerHandles.map((c) => ({ x: c.x, y: c.y }));
-
-              const isOrthoSlide =
-                (sel.routing || 'elbow') === 'elbow' &&
-                mh.orientation !== 'diagonal' &&
-                !e.altKey;
-
-              if (isOrthoSlide) {
-                const verts = routed.controlVertices;
-                const segIdx = mh.segmentIndex;
-                const startsAtAnchor = segIdx === 0;
-                const endsAtAnchor = segIdx + 1 === verts.length - 1;
-                const nextWaypoints = [...baseWaypoints];
-
-                let wpIdxA = segIdx - 1;
-                let wpIdxB = segIdx;
-
-                if (startsAtAnchor && endsAtAnchor) {
-                  // Direct 2-point orthogonal segment: insert two stub corners so both anchors stay pinned
-                  nextWaypoints.splice(0, 0, { ...verts[0] }, { ...verts[1] });
-                  wpIdxA = 0;
-                  wpIdxB = 1;
-                } else if (startsAtAnchor) {
-                  // Segment starts directly at start anchor: insert stub corner at start
-                  nextWaypoints.splice(0, 0, { ...verts[0] });
-                  wpIdxA = 0;
-                  wpIdxB = 1;
-                } else if (endsAtAnchor) {
-                  // Segment ends directly at end anchor: insert stub corner at end
-                  nextWaypoints.push({ ...verts[verts.length - 1] });
-                  wpIdxA = segIdx - 1;
-                  wpIdxB = nextWaypoints.length - 1;
-                }
-
-                store.setElementsLive((els) =>
-                  els.map((el) => (el.id === sel.id ? { ...el, waypoints: nextWaypoints } : el)),
-                );
-                interactionRef.current = {
-                  mode: 'drag-connector-segment',
-                  id: sel.id,
-                  axis: mh.orientation === 'vertical' ? 'x' : 'y',
-                  wpIdxA,
-                  wpIdxB,
-                };
-                setCursorStyle(mh.orientation === 'vertical' ? 'ew-resize' : 'ns-resize');
-                return;
-              }
-
               const nextWaypoints = [...baseWaypoints];
               nextWaypoints.splice(mh.insertIndex, 0, { x: mh.x, y: mh.y });
               store.setElementsLive((els) =>
@@ -739,6 +749,19 @@ export function WhiteboardCanvas() {
                 id: sel.id,
                 waypointIndex: mh.insertIndex,
               };
+              return;
+            }
+          }
+
+          // Allow dragging ANYWHERE along an orthogonal elbow segment (not only on the midpoint dot)
+          if ((sel.routing || 'elbow') === 'elbow' && !e.altKey) {
+            const segHit = findOrthoSegmentAtPoint(
+              world,
+              routed.controlVertices,
+              8 / store.camera.zoom,
+            );
+            if (segHit) {
+              beginOrthoSegmentSlide(sel, segHit.segmentIndex, segHit.orientation, routed, world);
               return;
             }
           }
@@ -881,6 +904,24 @@ export function WhiteboardCanvas() {
         return;
       }
 
+      // Direct 1-click drag anywhere on a bound orthogonal elbow connector segment (even before selecting)
+      if (
+        !isMultiSelectMod &&
+        !e.altKey &&
+        nextSelected.length === 1 &&
+        hit.type === 'connector' &&
+        !hit.locked &&
+        (hit.routing || 'elbow') === 'elbow' &&
+        (hit.startBinding || hit.endBinding)
+      ) {
+        const routed = computeConnectorPath(hit, elementsById);
+        const segHit = findOrthoSegmentAtPoint(world, routed.controlVertices, 8 / store.camera.zoom);
+        if (segHit) {
+          beginOrthoSegmentSlide(hit, segHit.segmentIndex, segHit.orientation, routed, world);
+          return;
+        }
+      }
+
       const movable = nextSelected
         .map((id) => elementsById.get(id))
         .filter((el) => el && !el.locked);
@@ -1008,6 +1049,15 @@ export function WhiteboardCanvas() {
                   } else {
                     nextCursor = 'move';
                   }
+                } else if ((sel.routing || 'elbow') === 'elbow') {
+                  const segHover = findOrthoSegmentAtPoint(
+                    world,
+                    routed.controlVertices,
+                    8 / store.camera.zoom,
+                  );
+                  if (segHover) {
+                    nextCursor = segHover.orientation === 'vertical' ? 'ew-resize' : 'ns-resize';
+                  }
                 }
               }
             } else if (sel && !sel.locked && sel.type !== 'connector' && sel.type !== 'freehand') {
@@ -1072,6 +1122,22 @@ export function WhiteboardCanvas() {
             if (labelHover && !labelHover.locked) {
               nextHoveredLabelId = labelHover.id;
               nextCursor = 'move';
+            } else if (
+              topHit &&
+              topHit.type === 'connector' &&
+              !topHit.locked &&
+              (topHit.routing || 'elbow') === 'elbow' &&
+              (topHit.startBinding || topHit.endBinding)
+            ) {
+              const routed = computeConnectorPath(topHit, map);
+              const segHover = findOrthoSegmentAtPoint(
+                world,
+                routed.controlVertices,
+                8 / store.camera.zoom,
+              );
+              if (segHover) {
+                nextCursor = segHover.orientation === 'vertical' ? 'ew-resize' : 'ns-resize';
+              }
             }
           }
 
@@ -1286,9 +1352,22 @@ export function WhiteboardCanvas() {
     }
 
     if (interaction.mode === 'drag-connector-segment') {
+      const dx = world.x - interaction.startWorld.x;
+      const dy = world.y - interaction.startWorld.y;
+      const deadzone = 3 / store.camera.zoom;
+      if (!interaction.moved && Math.hypot(dx, dy) < deadzone) {
+        return;
+      }
+
       const map = new Map(store.elements.map((el) => [el.id, el]));
       const targetConn = map.get(interaction.id);
-      if (!targetConn || !targetConn.waypoints) return;
+      if (!targetConn) return;
+
+      if (!interaction.historyCommitted) {
+        store.commitSnapshot();
+        interaction.historyCommitted = true;
+      }
+      interaction.moved = true;
 
       const rawCoord = interaction.axis === 'x' ? world.x : world.y;
       let nextCoord =
@@ -1310,13 +1389,19 @@ export function WhiteboardCanvas() {
 
       store.setElementsLive((els) =>
         els.map((el) => {
-          if (el.id !== interaction.id || !el.waypoints) return el;
-          const nextWaypoints = el.waypoints.map((pt, idx) => {
-            if (idx !== interaction.wpIdxA && idx !== interaction.wpIdxB) return pt;
-            return interaction.axis === 'x'
-              ? { x: nextCoord, y: pt.y }
-              : { x: pt.x, y: nextCoord };
-          });
+          if (el.id !== interaction.id) return el;
+          const sourceWaypoints =
+            el.waypoints && el.waypoints.length >= interaction.preparedWaypoints.length
+              ? el.waypoints
+              : interaction.preparedWaypoints;
+          const nextWaypoints = sourceWaypoints.map(
+            (/** @type {{ x: number, y: number }} */ pt, /** @type {number} */ idx) => {
+              if (idx !== interaction.wpIdxA && idx !== interaction.wpIdxB) return pt;
+              return interaction.axis === 'x'
+                ? { x: nextCoord, y: pt.y }
+                : { x: pt.x, y: nextCoord };
+            },
+          );
           return { ...el, waypoints: nextWaypoints, labelPos: null };
         }),
       );
@@ -1674,7 +1759,7 @@ export function WhiteboardCanvas() {
       interaction.mode === 'draw-connector' ||
       interaction.mode === 'drag-connector-end' ||
       interaction.mode === 'drag-connector-waypoint' ||
-      interaction.mode === 'drag-connector-segment' ||
+      (interaction.mode === 'drag-connector-segment' && interaction.moved) ||
       interaction.mode === 'resize' ||
       (interaction.mode === 'move' && interaction.moved)
     ) {

@@ -1492,5 +1492,51 @@ p "1" -- "N" t : "MELAKUKAN"
     expect(slidConn?.endBinding).toEqual({ elementId: 'n2', side: 'bottom', rx: 0.5, ry: 1 });
     expect(slidConn?.waypoints?.[0]).toEqual({ x: 310, y: 160 });
     expect(slidConn?.waypoints?.[1]).toEqual({ x: 310, y: 320 });
+
+    // Deselect and grab ANYWHERE along the vertical segment (y = 190, NOT the midpoint y = 240)
+    // to slide it back left to x = 285 in a single click-drag without detaching endpoints
+    act(() => {
+      useBoardStore.getState().setSelectedIds([]);
+    });
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, cancelable: true, clientX: 310, clientY: 190 }),
+      );
+    });
+    expect(canvas.style.cursor).toBe('ew-resize');
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 310,
+          clientY: 190,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 285,
+          clientY: 190,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointerup', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 285,
+          clientY: 190,
+          button: 0,
+        }),
+      );
+    });
+    const slidAnywhere = useBoardStore.getState().elements.find((el) => el.id === 'c-slide-test');
+    expect(slidAnywhere?.startBinding).toEqual({ elementId: 'n1', side: 'right', rx: 1, ry: 0.5 });
+    expect(slidAnywhere?.endBinding).toEqual({ elementId: 'n2', side: 'bottom', rx: 0.5, ry: 1 });
+    expect(slidAnywhere?.waypoints?.[0]).toEqual({ x: 285, y: 160 });
+    expect(slidAnywhere?.waypoints?.[1]).toEqual({ x: 285, y: 320 });
   });
 });
