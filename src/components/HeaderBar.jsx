@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Code2,
+  Crown,
   Download,
   FolderPlus,
   Layers,
@@ -548,6 +549,16 @@ export function HeaderBar({ onOpenExport, onOpenPlantText, onOpenAiIntegration }
             <span className="text-xs font-medium text-[#475569] max-w-24 truncate" title={user.email}>
               {user.name}
             </span>
+            {(user.hasAiAccess || user.plan === 'pro' || user.isOwner) && (
+              <span
+                aria-label="Akun FlowBoard Pro"
+                title={user.isOwner ? 'Akun Owner (FlowBoard Pro Aktif)' : 'Akun FlowBoard Pro Aktif'}
+                className="inline-flex items-center gap-0.5 rounded-full border border-[#B45309]/30 bg-[#FEF3C7] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#B45309] leading-none shrink-0"
+              >
+                <Crown className="h-2.5 w-2.5" strokeWidth={2} aria-hidden="true" />
+                <span>PRO</span>
+              </span>
+            )}
             <button
               type="button"
               onClick={() => logout()}

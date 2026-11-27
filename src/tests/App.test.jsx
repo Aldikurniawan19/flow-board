@@ -1060,7 +1060,8 @@ p "1" -- "N" t : "MELAKUKAN"
       expect(useBoardStore.getState().elements).toHaveLength(2);
     });
 
-    // 1. Free user clicking "Rapikan Penuh" in the sidebar "Rapikan Tata Letak" section opens the Pro upgrade paywall
+    // 1. Free user does not see header PRO badge and clicking "Rapikan Penuh" opens the Pro upgrade paywall
+    expect(screen.queryByLabelText('Akun FlowBoard Pro')).not.toBeInTheDocument();
     const fullTidyBtn = screen.getByRole('button', { name: 'Rapikan Penuh' });
     expect(screen.getByRole('button', { name: 'Rapikan Garis & Label Saja' })).toBeInTheDocument();
     await user.click(fullTidyBtn);
@@ -1069,7 +1070,7 @@ p "1" -- "N" t : "MELAKUKAN"
     ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Tutup dialog integrasi AI' }));
 
-    // 2. Pro / Owner user runs "Rapikan Penuh" from the sidebar "Rapikan Tata Letak" section
+    // 2. Pro / Owner user sees the header PRO badge and runs "Rapikan Penuh" from the sidebar "Rapikan Tata Letak" section
     act(() => {
       useBoardStore.setState({
         user: {
@@ -1082,6 +1083,7 @@ p "1" -- "N" t : "MELAKUKAN"
         },
       });
     });
+    expect(screen.getByLabelText('Akun FlowBoard Pro')).toHaveTextContent('PRO');
 
     const tidySpy = vi.spyOn(apiClient, 'tidyDiagram').mockResolvedValue({
       elements: sampleElements.map((el) => ({ ...el, x: el.x + 20 })),

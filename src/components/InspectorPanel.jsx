@@ -144,11 +144,8 @@ export function InspectorPanel({ open, onToggle }) {
         onClick={onToggle}
         title="Buka Pengaturan Papan (])"
         aria-label="Buka panel properti elemen (])"
-        className="fixed right-3 top-14 z-20 inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] px-2.5 py-2 text-xs font-medium text-[#0F172A] shadow-sm hover:bg-[#F1F5F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+        className="fixed right-3 top-14 z-20 inline-flex items-center justify-center rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] p-2 text-xs font-medium text-[#0F172A] shadow-sm hover:bg-[#F1F5F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
       >
-        <span aria-hidden="true" className="text-[10px] font-mono-tabular text-[#475569]">
-          ]
-        </span>
         <PanelRightOpen className="h-4 w-4 text-[#475569]" strokeWidth={1.75} aria-hidden="true" />
       </button>
     );
@@ -307,11 +304,8 @@ export function InspectorPanel({ open, onToggle }) {
           onClick={onToggle}
           title="Tutup Pengaturan Papan (])"
           aria-label="Tutup panel properti (])"
-          className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
+          className="inline-flex items-center justify-center p-1 rounded-md text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
         >
-          <span aria-hidden="true" className="text-[10px] font-mono-tabular">
-            ]
-          </span>
           <PanelRightClose className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
         </button>
       </div>
