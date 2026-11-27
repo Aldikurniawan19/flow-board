@@ -1407,5 +1407,90 @@ p "1" -- "N" t : "MELAKUKAN"
     expect(useBoardStore.getState().elements.find((el) => el.id === connOne.id)?.routing).toBe(
       'straight',
     );
+
+    // 12. Dragging the midpoint handle of an orthogonal elbow vertical segment slides the entire segment
+    //     left/right in unison while keeping both bound endpoints firmly attached
+    act(() => {
+      useBoardStore.setState((prev) => ({
+        ...prev,
+        activeTool: 'select',
+        selectedIds: ['c-slide-test'],
+        settings: { ...prev.settings, snapToGrid: false },
+        elements: [
+          ...prev.elements,
+          {
+            id: 'c-slide-test',
+            type: 'connector',
+            x: 220,
+            y: 160,
+            width: -120,
+            height: 160,
+            strokeColor: '#0F172A',
+            fillColor: 'transparent',
+            strokeWidth: 2,
+            strokeStyle: 'solid',
+            roughness: 0,
+            opacity: 1,
+            seed: 99,
+            text: '',
+            routing: 'elbow',
+            startMarker: 'none',
+            endMarker: 'filled_arrow',
+            startBinding: { elementId: 'n1', side: 'right', rx: 1, ry: 0.5 },
+            endBinding: { elementId: 'n2', side: 'bottom', rx: 0.5, ry: 1 },
+            waypoints: [
+              { x: 260, y: 160 },
+              { x: 260, y: 320 },
+              { x: 420, y: 320 },
+            ],
+          },
+        ],
+      }));
+    });
+
+    // Hover midpoint of vertical segment (260, 160) -> (260, 320) at (260, 240) shows ew-resize cursor
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, cancelable: true, clientX: 260, clientY: 240 }),
+      );
+    });
+    expect(canvas.style.cursor).toBe('ew-resize');
+
+    // Drag that midpoint horizontally to x = 310 -> both corners move to x = 310 while bindings stay attached
+    act(() => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 260,
+          clientY: 240,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 310,
+          clientY: 240,
+          button: 0,
+        }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointerup', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 310,
+          clientY: 240,
+          button: 0,
+        }),
+      );
+    });
+
+    const slidConn = useBoardStore.getState().elements.find((el) => el.id === 'c-slide-test');
+    expect(slidConn?.startBinding).toEqual({ elementId: 'n1', side: 'right', rx: 1, ry: 0.5 });
+    expect(slidConn?.endBinding).toEqual({ elementId: 'n2', side: 'bottom', rx: 0.5, ry: 1 });
+    expect(slidConn?.waypoints?.[0]).toEqual({ x: 310, y: 160 });
+    expect(slidConn?.waypoints?.[1]).toEqual({ x: 310, y: 320 });
   });
 });

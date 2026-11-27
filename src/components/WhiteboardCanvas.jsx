@@ -24,7 +24,7 @@ import {
   isConnectableElement,
   normalizeRotation,
 } from '../engine/ports.js';
-import { computeConnectorPath } from '../engine/router.js';
+import { computeConnectorPath, simplifyConnectorWaypoints } from '../engine/router.js';
 import { recognizeFreehandShape } from '../engine/shapeRecognizer.js';
 import {
   createConnectorFromPreset,
@@ -672,7 +672,9 @@ export function WhiteboardCanvas() {
             }
           }
 
-          // Hit-test segment midpoint handles to insert a new flexible corner
+          // Hit-test segment midpoint handles:
+          // On orthogonal elbow segments (unless Alt is held), slide the entire perpendicular segment
+          // smoothly left/right or up/down while keeping both bound endpoints firmly attached.
           for (const mh of routed.midpointHandles) {
             if (Math.hypot(world.x - mh.x, world.y - mh.y) <= r) {
               store.commitSnapshot();
@@ -680,6 +682,53 @@ export function WhiteboardCanvas() {
                 sel.waypoints && sel.waypoints.length > 0
                   ? sel.waypoints.map((p) => ({ ...p }))
                   : routed.cornerHandles.map((c) => ({ x: c.x, y: c.y }));
+
+              const isOrthoSlide =
+                (sel.routing || 'elbow') === 'elbow' &&
+                mh.orientation !== 'diagonal' &&
+                !e.altKey;
+
+              if (isOrthoSlide) {
+                const verts = routed.controlVertices;
+                const segIdx = mh.segmentIndex;
+                const startsAtAnchor = segIdx === 0;
+                const endsAtAnchor = segIdx + 1 === verts.length - 1;
+                const nextWaypoints = [...baseWaypoints];
+
+                let wpIdxA = segIdx - 1;
+                let wpIdxB = segIdx;
+
+                if (startsAtAnchor && endsAtAnchor) {
+                  // Direct 2-point orthogonal segment: insert two stub corners so both anchors stay pinned
+                  nextWaypoints.splice(0, 0, { ...verts[0] }, { ...verts[1] });
+                  wpIdxA = 0;
+                  wpIdxB = 1;
+                } else if (startsAtAnchor) {
+                  // Segment starts directly at start anchor: insert stub corner at start
+                  nextWaypoints.splice(0, 0, { ...verts[0] });
+                  wpIdxA = 0;
+                  wpIdxB = 1;
+                } else if (endsAtAnchor) {
+                  // Segment ends directly at end anchor: insert stub corner at end
+                  nextWaypoints.push({ ...verts[verts.length - 1] });
+                  wpIdxA = segIdx - 1;
+                  wpIdxB = nextWaypoints.length - 1;
+                }
+
+                store.setElementsLive((els) =>
+                  els.map((el) => (el.id === sel.id ? { ...el, waypoints: nextWaypoints } : el)),
+                );
+                interactionRef.current = {
+                  mode: 'drag-connector-segment',
+                  id: sel.id,
+                  axis: mh.orientation === 'vertical' ? 'x' : 'y',
+                  wpIdxA,
+                  wpIdxB,
+                };
+                setCursorStyle(mh.orientation === 'vertical' ? 'ew-resize' : 'ns-resize');
+                return;
+              }
+
               const nextWaypoints = [...baseWaypoints];
               nextWaypoints.splice(mh.insertIndex, 0, { x: mh.x, y: mh.y });
               store.setElementsLive((els) =>
@@ -936,7 +985,32 @@ export function WhiteboardCanvas() {
 
           if (store.selectedIds.length === 1) {
             const sel = map.get(store.selectedIds[0]);
-            if (sel && !sel.locked && sel.type !== 'connector' && sel.type !== 'freehand') {
+            if (sel && !sel.locked && sel.type === 'connector') {
+              const routed = computeConnectorPath(sel, map);
+              const handleR = 10 / store.camera.zoom;
+              const startPt = routed.points[0];
+              const endPt = routed.points[routed.points.length - 1];
+              if (
+                Math.hypot(world.x - startPt.x, world.y - startPt.y) <= handleR ||
+                Math.hypot(world.x - endPt.x, world.y - endPt.y) <= handleR ||
+                routed.cornerHandles.some((ch) => Math.hypot(world.x - ch.x, world.y - ch.y) <= handleR)
+              ) {
+                nextCursor = 'move';
+              } else {
+                const hitMid = routed.midpointHandles.find(
+                  (mh) => Math.hypot(world.x - mh.x, world.y - mh.y) <= handleR,
+                );
+                if (hitMid) {
+                  if ((sel.routing || 'elbow') === 'elbow' && hitMid.orientation === 'vertical') {
+                    nextCursor = 'ew-resize';
+                  } else if ((sel.routing || 'elbow') === 'elbow' && hitMid.orientation === 'horizontal') {
+                    nextCursor = 'ns-resize';
+                  } else {
+                    nextCursor = 'move';
+                  }
+                }
+              }
+            } else if (sel && !sel.locked && sel.type !== 'connector' && sel.type !== 'freehand') {
               const rect = getNormalizedRect(sel);
               const rot = sel.rotation || 0;
               if (hitTestRotationHandle(world, rect, store.camera.zoom, rot)) {
@@ -1208,6 +1282,44 @@ export function WhiteboardCanvas() {
               : interaction.initialEndBinding,
         });
       });
+      return;
+    }
+
+    if (interaction.mode === 'drag-connector-segment') {
+      const map = new Map(store.elements.map((el) => [el.id, el]));
+      const targetConn = map.get(interaction.id);
+      if (!targetConn || !targetConn.waypoints) return;
+
+      const rawCoord = interaction.axis === 'x' ? world.x : world.y;
+      let nextCoord =
+        store.settings.snapToGrid && !e.altKey
+          ? snapValue(rawCoord, GRID_SIZE, true)
+          : rawCoord;
+
+      if (!e.altKey) {
+        const routed = computeConnectorPath(targetConn, map);
+        const verts = routed.controlVertices;
+        const startPt = verts[0];
+        const endPt = verts[verts.length - 1];
+        const alignTol = 7 / store.camera.zoom;
+        const startVal = interaction.axis === 'x' ? startPt.x : startPt.y;
+        const endVal = interaction.axis === 'x' ? endPt.x : endPt.y;
+        if (Math.abs(nextCoord - startVal) <= alignTol) nextCoord = startVal;
+        else if (Math.abs(nextCoord - endVal) <= alignTol) nextCoord = endVal;
+      }
+
+      store.setElementsLive((els) =>
+        els.map((el) => {
+          if (el.id !== interaction.id || !el.waypoints) return el;
+          const nextWaypoints = el.waypoints.map((pt, idx) => {
+            if (idx !== interaction.wpIdxA && idx !== interaction.wpIdxB) return pt;
+            return interaction.axis === 'x'
+              ? { x: nextCoord, y: pt.y }
+              : { x: pt.x, y: nextCoord };
+          });
+          return { ...el, waypoints: nextWaypoints, labelPos: null };
+        }),
+      );
       return;
     }
 
@@ -1562,9 +1674,27 @@ export function WhiteboardCanvas() {
       interaction.mode === 'draw-connector' ||
       interaction.mode === 'drag-connector-end' ||
       interaction.mode === 'drag-connector-waypoint' ||
+      interaction.mode === 'drag-connector-segment' ||
       interaction.mode === 'resize' ||
       (interaction.mode === 'move' && interaction.moved)
     ) {
+      if (interaction.mode === 'drag-connector-segment') {
+        store.setElementsLive((els) => {
+          const map = new Map(els.map((item) => [item.id, item]));
+          return els.map((el) => {
+            if (el.id !== interaction.id || !el.waypoints) return el;
+            const routed = computeConnectorPath(el, map);
+            const verts = routed.controlVertices;
+            const cleanWp = simplifyConnectorWaypoints(
+              verts[0],
+              el.waypoints,
+              verts[verts.length - 1],
+            );
+            return { ...el, waypoints: cleanWp.length > 0 ? cleanWp : undefined };
+          });
+        });
+        setCursorStyle('default');
+      }
       if (interaction.mode === 'move' && interaction.moved && interaction.movedNodeIds?.size > 0) {
         store.setElementsLive((els) =>
           rerouteAffectedConnectors(els, interaction.movedNodeIds, {

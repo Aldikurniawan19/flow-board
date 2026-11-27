@@ -276,7 +276,21 @@ function polylineMidpoint(pts) {
 }
 
 /**
- * Build interactive corner handles and segment-midpoint insertion handles for a connector.
+ * Simplify interior waypoints for a connector given its resolved start & end anchors,
+ * removing consecutive duplicates and redundant collinear points.
+ * @param {{ x: number, y: number }} start
+ * @param {Array<{ x: number, y: number }>} waypoints
+ * @param {{ x: number, y: number }} end
+ * @returns {Array<{ x: number, y: number }>}
+ */
+export function simplifyConnectorWaypoints(start, waypoints, end) {
+  if (!waypoints || waypoints.length === 0) return [];
+  const simplified = simplifyPolyline([start, ...waypoints, end]);
+  return simplified.length > 2 ? simplified.slice(1, -1) : [];
+}
+
+/**
+ * Build interactive corner handles and segment-midpoint handles for a connector.
  * @param {Array<{ x: number, y: number }>} controlVertices [start, ...interiorCorners, end]
  * @param {boolean} hasCustomWaypoints
  */
@@ -288,14 +302,23 @@ function buildConnectorHandles(controlVertices, hasCustomWaypoints) {
     isCustom: hasCustomWaypoints,
   }));
 
-  /** @type {Array<{ insertIndex: number, x: number, y: number }>} */
+  /** @type {Array<{ insertIndex: number, segmentIndex: number, orientation: 'horizontal' | 'vertical' | 'diagonal', x: number, y: number }>} */
   const midpointHandles = [];
   for (let i = 0; i < controlVertices.length - 1; i += 1) {
     const a = controlVertices[i];
     const b = controlVertices[i + 1];
     if (Math.hypot(b.x - a.x, b.y - a.y) >= 34) {
+      /** @type {'horizontal' | 'vertical' | 'diagonal'} */
+      const orientation =
+        Math.abs(a.x - b.x) < 1
+          ? 'vertical'
+          : Math.abs(a.y - b.y) < 1
+            ? 'horizontal'
+            : 'diagonal';
       midpointHandles.push({
         insertIndex: i,
+        segmentIndex: i,
+        orientation,
         x: (a.x + b.x) / 2,
         y: (a.y + b.y) / 2,
       });
@@ -396,8 +419,16 @@ export function computeConnectorPath(connector, elementsById) {
       routing,
       points: sampled,
       controlVertices: [start, end],
-      cornerHandles: [],
-      midpointHandles: [{ insertIndex: 0, x: mid.x, y: mid.y }],
+      cornerHandles: /** @type {Array<{ index: number, x: number, y: number, isCustom: boolean }>} */ ([]),
+      midpointHandles: [
+        {
+          insertIndex: 0,
+          segmentIndex: 0,
+          orientation: /** @type {'horizontal' | 'vertical' | 'diagonal'} */ ('diagonal'),
+          x: mid.x,
+          y: mid.y,
+        },
+      ],
       startAngle: Math.atan2(start.y - cp1.y, start.x - cp1.x),
       endAngle: Math.atan2(end.y - cp2.y, end.x - cp2.x),
       labelPosition: labelPos || mid,

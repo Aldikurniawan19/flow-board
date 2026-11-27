@@ -1002,7 +1002,7 @@ export function InspectorPanel({ open, onToggle }) {
                   </div>
                 </div>
                 <p className="text-[11px] text-[#475569]">
-                  Seret titik sudut biru untuk menggeser, seret titik tengah garis untuk menambah sudut, atau klik 2x titik untuk menghapus.
+                  Seret titik tengah garis untuk menggeser segmen (kiri/kanan/atas/bawah), seret titik sudut untuk menggeser sudut, atau klik 2x titik sudut untuk menghapus.
                 </p>
 
                 <div>
